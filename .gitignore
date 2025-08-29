@@ -1,0 +1,20 @@
+# Dependencias
+node_modules/
+
+# Carpeta de compilación
+dist/
+
+# Archivos de entorno
+.env
+.env.local
+.env.*.local
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
