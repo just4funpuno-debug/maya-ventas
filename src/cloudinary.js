@@ -14,13 +14,13 @@ export async function getSignature(params = {}) {
 export async function uploadProductImage(file, opts = {}) {
   // (optional) pre-compress large images client-side via canvas if desired (reuse existing logic outside)
   const { public_id, folder = 'productos' } = opts;
-  const { signature, timestamp, apiKey, cloudName } = await getSignature({ public_id, folder });
+  const { signature, timestamp, apiKey, cloudName, folder: signedFolder } = await getSignature({ public_id, folder });
   const form = new FormData();
   form.append('file', file);
   form.append('api_key', apiKey);
   form.append('timestamp', timestamp);
   form.append('signature', signature);
-  form.append('folder', folder);
+  form.append('folder', signedFolder); // usa el folder firmado
   if (public_id) form.append('public_id', public_id);
   const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
   const resp = await fetch(uploadUrl, { method: 'POST', body: form });
