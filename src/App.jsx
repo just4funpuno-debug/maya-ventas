@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from "recharts";
 import {
   LogIn, LogOut, ShoppingCart, CircleDollarSign, TrendingUp, AlertTriangle, Upload, Plus,
-  Package, FileSpreadsheet, Wallet, Settings, X, UserPlus, MapPin, Search, Plane, Clock, Check, History
+  Package, FileSpreadsheet, Wallet, Settings, X, UserPlus, MapPin, Search, Plane, Clock, Check, History,
+  ArrowLeft, ArrowRight, MessageSquare
 } from "lucide-react";
 import Papa from "papaparse";
 
@@ -163,10 +164,12 @@ const seedProducts = [
 ];
 
 const seedUsers = [
-  { id: "admin", nombre: "Pedro", apellidos: "Admin", celular: "", email: "admin@maya.com", password: "admin123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "admin", productos: [], grupo: 'A' },
+  { id: "admin", nombre: "Pedro", apellidos: "Admin", celular: "", email: "admin@maya.com", username: 'admin', password: "admin123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "admin", productos: [], grupo: 'A' },
+  // Nuevo admin adicional solicitado
+  { id: "admin2", nombre: "Pedro", apellidos: "Admin", celular: "", email: "pedroadmin@maya.com", username: 'pedroadmin', password: "pedro123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "admin", productos: [], grupo: 'A' },
   // Renombrada Ana -> Beatriz Vargas
-  { id: "v1", nombre: "Beatriz", apellidos: "vargas", celular: "", email: "ana@maya.com", password: "ana123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "seller", productos: [], grupo: 'A' },
-  { id: "v2", nombre: "Luisa", apellidos: "Pérez", celular: "", email: "luisa@maya.com", password: "luisa123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "seller", productos: ["MENO-60"], grupo: 'B' },
+  { id: "v1", nombre: "Beatriz", apellidos: "vargas", celular: "", email: "ana@maya.com", username: 'ana', password: "ana123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "seller", productos: [], grupo: 'A' },
+  { id: "v2", nombre: "Luisa", apellidos: "Pérez", celular: "", email: "luisa@maya.com", username: 'luisa', password: "luisa123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "seller", productos: ["MENO-60"], grupo: 'B' },
 ];
 
 const seedSales = [
@@ -176,7 +179,7 @@ const seedSales = [
 ];
 
 // LocalStorage helpers
-const LS_KEYS = { products: "ventas.products", users: "ventas.users", sales: "ventas.sales", session: "ventas.session", warehouseDispatches: 'ventas.wdispatch' };
+const LS_KEYS = { products: "ventas.products", users: "ventas.users", sales: "ventas.sales", session: "ventas.session", warehouseDispatches: 'ventas.wdispatch', teamMessages:'ventas.team.msgs' };
 // Agregamos almacenamiento para Mis Números
 LS_KEYS.numeros = 'ventas.numeros';
 function loadLS(k, f) { try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) : f; } catch { return f; } }
@@ -224,22 +227,41 @@ function normalizeUser(u) {
     nombre: u.nombre || '',
     apellidos: u.apellidos || '',
     celular: u.celular || '',
-    email: u.email || '',
+    username: u.username || u.email || '', // migración desde email
     password: u.password || '',
     fechaIngreso: u.fechaIngreso || todayISO(),
     sueldo: typeof u.sueldo === 'number' ? u.sueldo : Number(u.sueldo || 0),
+    // Nuevo: día de pago del mes (1-31). Migramos desde fechaPago (date) si existe.
+    diaPago: (() => {
+      if (u.diaPago && !isNaN(Number(u.diaPago))) {
+        const n = Number(u.diaPago); if(n>=1 && n<=31) return n; }
+      if (u.fechaPago) { // legacy almacenaba fecha completa
+        const str = String(u.fechaPago);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) { return Number(str.slice(-2)); }
+        const n = Number(str); if(!isNaN(n) && n>=1 && n<=31) return n;
+      }
+      return Number(todayISO().slice(-2));
+    })(),
+    // Conservamos fechaPago legacy si alguien la usa en otra parte (no se utilizará en UI nueva)
     fechaPago: u.fechaPago || todayISO(),
     rol: u.rol || 'seller',
-  productos: Array.isArray(u.productos) ? u.productos : [],
-  grupo: u.grupo || ''
+    productos: Array.isArray(u.productos) ? u.productos : [],
+    grupo: u.grupo || ''
   };
 }
 
 export default function App() {
   const [products, setProducts] = useState(() => loadLS(LS_KEYS.products, seedProducts));
-  const [users, setUsers] = useState(() => loadLS(LS_KEYS.users, seedUsers)
-    .map(u=> (u.id==='v1' && u.nombre==='Ana') ? { ...u, nombre:'Beatriz', apellidos:'vargas' } : u)
-    .map(normalizeUser));
+  const [users, setUsers] = useState(() => {
+    const base = loadLS(LS_KEYS.users, seedUsers)
+      .map(u=> (u.id==='v1' && u.nombre==='Ana') ? { ...u, nombre:'Beatriz', apellidos:'vargas' } : u)
+      .map(normalizeUser);
+    // Migración: asegurar usuario pedroadmin exista aunque el LS sea antiguo
+    if (!base.some(u=> u.username==='pedroadmin')) {
+      base.push(normalizeUser({ id: 'admin2', nombre:'Pedro', apellidos:'Admin', username:'pedroadmin', password:'pedro123', rol:'admin', productos:[], grupo:'A', fechaIngreso: todayISO(), fechaPago: todayISO(), sueldo:0 }));
+    }
+    return base;
+  });
   const [sales, setSales] = useState(() => {
     const loaded = loadLS(LS_KEYS.sales, seedSales).map(s=> ({ ...s, ciudad: s.ciudad || 'SIN CIUDAD', estadoEntrega: s.estadoEntrega || 'confirmado' }));
     // Asignar timestamps de confirmación a los ya confirmados que no lo tengan para poder ordenar por orden de confirmación.
@@ -248,6 +270,9 @@ export default function App() {
       let next = s;
       if((next.estadoEntrega||'confirmado')==='confirmado' && !next.confirmadoAt){
         next = { ...next, confirmadoAt: ++base };
+      }
+      if(next.estadoEntrega==='cancelado' && !next.canceladoAt){
+        next = { ...next, canceladoAt: ++base };
       }
       // Migración: agregar vendedoraId si falta
       if(!next.vendedoraId && next.vendedora){
@@ -262,15 +287,24 @@ export default function App() {
   const [dispatches, setDispatches] = useState(() => loadLS(LS_KEYS.warehouseDispatches, []).map(d=> ({ ...d, status: d.status || 'confirmado' })));
   // Estado para "Mis Números"
   const [numbers, setNumbers] = useState(()=> loadLS(LS_KEYS.numeros, [])); // [{id, sku, email, celular, caduca, createdAt}]
+  const [teamMessages, setTeamMessages] = useState(()=> loadLS(LS_KEYS.teamMessages, [])); // [{id, grupo, authorId, authorNombre, text, createdAt, readBy:[] }]
   const [view, setView] = useState(()=>{
-     try { return localStorage.getItem('ui.view') || 'dashboard'; } catch { return 'dashboard'; }
-  }); // 'dashboard' | 'historial' | 'ventas' | 'register-sale' | 'almacen' | 'create-user' | 'users-list' | 'products' | 'mis-numeros' | 'config'
+    try { return localStorage.getItem('ui.view') || 'dashboard'; } catch { return 'dashboard'; }
+  }); // 'dashboard' | 'historial' | 'ventas' | 'register-sale' | 'almacen' | 'create-user' | 'products' | 'mis-numeros' | 'config'
+
+  function navigate(next){
+    if(!next || next === view) return;
+    setView(next);
+    try { window.location.hash = '#'+next; } catch {}
+  }
   const [greeting, setGreeting] = useState(null); // { saludo, nombre, frase }
   const [greetingCloseReady, setGreetingCloseReady] = useState(false);
   // Comprobantes globales
   const [viewingReceipt, setViewingReceipt] = useState(null); // { id, data }
   const [editingReceipt, setEditingReceipt] = useState(null); // venta en edición
   const [receiptTemp, setReceiptTemp] = useState(null);
+  // Snapshots de limpiezas pendientes de registrar depósito (pueden ser varias ciudades)
+  const [depositSnapshots, setDepositSnapshots] = useState([]); // [{ id, city, timestamp, rows, resumen, depositAmount?, depositNote?, savedAt? }]
 
   // Mostrar saludo motivacional a vendedoras (no admin) una vez al día
   useEffect(()=>{
@@ -329,15 +363,38 @@ export default function App() {
   useEffect(() => saveLS(LS_KEYS.session, session), [session]);
   useEffect(() => saveLS(LS_KEYS.warehouseDispatches, dispatches), [dispatches]);
   useEffect(() => saveLS(LS_KEYS.numeros, numbers), [numbers]);
+  useEffect(() => saveLS(LS_KEYS.teamMessages, teamMessages), [teamMessages]);
+
+  // Auto logout por inactividad (15 minutos) y intento de cerrar pestaña al cerrar sesión
+  useEffect(()=>{
+    if(!session) return; // solo cuando logueado
+    let timeoutId;
+    const LOGOUT_MS = 15 * 60 * 1000; // 15 minutos
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(()=>{
+        try { localStorage.removeItem(LS_KEYS.session); } catch{}
+        setSession(null);
+        setView('dashboard');
+        alert('Sesión cerrada por inactividad');
+        try { window.close(); } catch {}
+      }, LOGOUT_MS);
+    };
+    const activityEvents = ['mousemove','keydown','click','scroll','focus'];
+    activityEvents.forEach(ev=> window.addEventListener(ev, resetTimer));
+    resetTimer();
+    return ()=> { activityEvents.forEach(ev=> window.removeEventListener(ev, resetTimer)); clearTimeout(timeoutId); };
+  }, [session]);
 
   // Persist view when changes
   useEffect(()=>{ try { localStorage.setItem('ui.view', view); } catch {} }, [view]);
 
-  if (!session) return <Auth onLogin={setSession} users={users} products={products} />;
+  if (!session) return <Auth onLogin={(s)=>{ setSession(s); navigate('dashboard'); }} users={users} products={products} />;
 
   return (
   <div className="min-h-screen bg-[#121f27] text-neutral-100 flex">
-  <Sidebar session={session} onLogout={() => { setSession(null); setView('dashboard'); }} view={view} setView={setView} />
+  <Sidebar session={session} onLogout={() => { try { localStorage.removeItem(LS_KEYS.session); } catch{}; setSession(null); setView('dashboard'); }} view={view} setView={navigate} />
+      {/* Barra de navegación histórica (atrás / adelante) */}
       <AnimatePresence>
         {greeting && (
           <Modal onClose={()=> greetingCloseReady && setGreeting(null)} disableClose>
@@ -362,21 +419,28 @@ export default function App() {
           setSales={setSales} 
           session={session} 
           users={users}
+          teamMessages={teamMessages}
+          setTeamMessages={setTeamMessages}
+          depositSnapshots={depositSnapshots}
           onOpenReceipt={(sale)=> sale?.comprobante && setViewingReceipt({ id:sale.id, data:sale.comprobante })}
           onEditReceipt={(sale)=> { setEditingReceipt(sale); setReceiptTemp(sale.comprobante||null); }}
         />
       )}
-     {view === 'historial' && session.rol === 'admin' && (
+      {view === 'historial' && session.rol === 'admin' && (
        <HistorialView 
          sales={sales} 
          products={products} 
          session={session} 
          users={users}
          onOpenReceipt={(sale)=> sale?.comprobante && setViewingReceipt({ id:sale.id, data:sale.comprobante })}
+         onGoDeposit={()=> setView('deposit')}
        />
      )}
-      {view === 'ventas' && (
-        <VentasView sales={sales} products={products} session={session} dispatches={dispatches} setDispatches={setDispatches} />
+    {view === 'ventas' && (
+  <VentasView sales={sales} setSales={setSales} products={products} session={session} dispatches={dispatches} setDispatches={setDispatches} setProducts={setProducts} setView={navigate} setDepositSnapshots={setDepositSnapshots} />
+    )}
+      {view === 'deposit' && session.rol==='admin' && (
+  <DepositConfirmView snapshots={depositSnapshots} setSnapshots={setDepositSnapshots} products={products} setSales={setSales} onBack={()=> setView('historial')} />
       )}
       {view === 'almacen' && session.rol === 'admin' && (
         <AlmacenView products={products} setProducts={setProducts} dispatches={dispatches} setDispatches={setDispatches} session={session} />
@@ -387,9 +451,6 @@ export default function App() {
       {view === 'create-user' && (
         <CreateUserAdmin users={users} setUsers={setUsers} session={session} products={products} />
       )}
-      {view === 'users-list' && (
-        <UsersListAdmin users={users} setUsers={setUsers} session={session} products={products} />
-      )}
       {view === 'products' && session.rol === 'admin' && (
         <ProductsView products={products} setProducts={setProducts} session={session} />
       )}
@@ -397,7 +458,19 @@ export default function App() {
         <FrasesView />
       )}
       {view === 'config' && (
-        <ConfigView session={session} users={users} setUsers={setUsers} setSession={setSession} />
+        <ConfigView 
+          session={session} 
+          users={users} 
+          setUsers={setUsers} 
+          setSession={setSession}
+          setProducts={setProducts}
+          setSales={setSales}
+          setDispatches={setDispatches}
+          setNumbers={setNumbers}
+          setTeamMessages={setTeamMessages}
+          setDepositSnapshots={setDepositSnapshots}
+          setView={setView}
+        />
       )}
       {view === 'mis-numeros' && (
         <MisNumerosView products={products} numbers={numbers} setNumbers={setNumbers} />
@@ -406,7 +479,7 @@ export default function App() {
       <AnimatePresence>
         {viewingReceipt && (
           <Modal onClose={()=> setViewingReceipt(null)}>
-            <div className="space-y-4 w-[360px]">
+            <div className="space-y-4 w-full max-w-[400px] px-1">
               <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><Search className="w-4 h-4" /> Ver Comprobante</h3>
               <div className="text-[11px] text-neutral-400">Venta: <span className="font-semibold text-neutral-200">{viewingReceipt.id.slice(-6)}</span></div>
               <div className="border border-neutral-700 rounded-lg p-2 bg-neutral-800/40 flex items-center justify-center min-h-[160px]">
@@ -424,7 +497,7 @@ export default function App() {
         )}
         {editingReceipt && (
           <Modal onClose={()=>{ setEditingReceipt(null); setReceiptTemp(null); }}>
-            <div className="space-y-4 w-[360px]">
+            <div className="space-y-4 w-full max-w-[400px] px-1">
               <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><Upload className="w-4 h-4" /> Comprobante (QR)</h3>
               <div className="space-y-2 text-xs">
                 <div className="text-neutral-400">Venta: <span className="font-semibold text-neutral-200">{editingReceipt.id.slice(-6)}</span></div>
@@ -460,6 +533,7 @@ export default function App() {
           </Modal>
         )}
       </AnimatePresence>
+  {/* Vista de depósito ahora es pantalla dedicada (ver view === 'deposit') */}
     </div>
   );
 }
@@ -484,7 +558,7 @@ function FrasesView(){
 }
 
 // ---------------------- Configuración (cambiar contraseña) ----------------------
-function ConfigView({ session, users, setUsers, setSession }) {
+function ConfigView({ session, users, setUsers, setSession, setProducts, setSales, setDispatches, setNumbers, setTeamMessages, setDepositSnapshots, setView }) {
   const [actual, setActual] = useState('');
   const [nueva, setNueva] = useState('');
   const [repite, setRepite] = useState('');
@@ -504,6 +578,39 @@ function ConfigView({ session, users, setUsers, setSession }) {
     setSession({ ...session });
     setActual(''); setNueva(''); setRepite('');
     setMsg('Contraseña actualizada');
+  }
+
+  function resetAll(){
+    if(!session || session.rol!== 'admin') { alert('Solo admin'); return; }
+    if(!window.confirm('¿Borrar absolutamente TODA la información (ventas, historial, productos, despachos, mensajes, números, snapshots)? Esta acción no se puede deshacer.')) return;
+    try {
+      // Limpiar estados (mantener al menos admin y seed básico vacío)
+      setSales([]);
+      setProducts([]);
+      // Mantener solo admin
+      setUsers(prev=> prev.filter(u=> u.rol==='admin'));
+      setDispatches([]);
+      setNumbers([]);
+      setTeamMessages([]);
+      setDepositSnapshots([]);
+      // Limpiar claves LS relevantes
+      const prefix = 'ventas.';
+      const keep = new Set(['ventas.session']);
+      const toRemove = [];
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if(!k) continue;
+        if(k.startsWith(prefix) && !keep.has(k)) toRemove.push(k);
+      }
+      toRemove.forEach(k=> localStorage.removeItem(k));
+      // También filtros UI
+      localStorage.removeItem('ui.view');
+      localStorage.removeItem('ui.cityFilter');
+      // Mantener sesión actual (admin) para seguir dentro; si se desea cerrar: descomentar siguiente línea
+      // setSession(null);
+      alert('Datos borrados. El sistema está limpio.');
+      setView('dashboard');
+    } catch(e){ console.error(e); alert('Error al borrar datos'); }
   }
 
   return (
@@ -532,6 +639,13 @@ function ConfigView({ session, users, setUsers, setSession }) {
           </div>
         </form>
         <div className="text-[10px] text-neutral-500 mt-4">Recomendación: usa una contraseña única de al menos 8 caracteres con números.</div>
+        {session?.rol==='admin' && (
+          <div className="mt-8 border-t border-neutral-800 pt-6 space-y-3">
+            <h3 className="text-sm font-semibold text-[#e7922b]">Reset total</h3>
+            <p className="text-[11px] text-neutral-400 leading-relaxed">Elimina absolutamente todas las ventas, historial, productos, despachos, números, mensajes y snapshots de depósito de este navegador, dejando solo el usuario administrador activo.</p>
+            <button onClick={resetAll} className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-sm w-full">Borrar todo (Irreversible)</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -544,36 +658,12 @@ function Auth({ onLogin, users }) {
   <div className="min-h-screen grid place-items-center bg-[#313841] text-[#eeeeee] p-6 w-full">
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
   <div className="bg-[#3a4750]/80 rounded-2xl p-6 shadow-xl border border-[#313841]">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center justify-center gap-3 mb-4 text-center">
             <LogIn className="w-5 h-5" />
-            <h1 className="text-xl font-semibold text-[#ea9216]">MAYA – Acceso</h1>
+            <h1 className="text-xl font-semibold text-[#ea9216]">Maya Ventas</h1>
           </div>
           <LoginForm users={users} onLogin={onLogin} />
-          <div className="mt-4 space-y-2">
-            <div className="text-xs text-neutral-400">Accesos demo rápidos</div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const u = users.find(u => u.id === 'admin');
-                  if (u) onLogin({ id: u.id, nombre: `${u.nombre} ${u.apellidos}`.trim(), email: u.email, rol: u.rol, productos: u.productos || [], grupo: u.grupo||'' });
-                }}
-                className="flex-1 btn-secondary text-sm"
-              >Admin demo</button>
-              <button
-                type="button"
-                onClick={() => {
-                  const u = users.find(u => u.id === 'v1') || users.find(u => u.rol === 'seller');
-                  if (u) onLogin({ id: u.id, nombre: `${u.nombre} ${u.apellidos}`.trim(), email: u.email, rol: u.rol, productos: u.productos || [], grupo: u.grupo||'' });
-                }}
-                className="flex-1 btn-secondary text-sm"
-              >Vendedora demo</button>
-            </div>
-          </div>
-          <div className="text-xs text-[#eeeeee]/70 mt-4 leading-relaxed">
-            Acceso restringido. La creación de nuevas vendedoras ahora solo la realiza un administrador.<br />
-            Demo: admin@maya.com / admin123 · ana@maya.com / ana123 · luisa@maya.com / luisa123
-          </div>
+          {/* Sección de accesos demo eliminada */}
         </div>
       </motion.div>
     </div>
@@ -588,16 +678,16 @@ function LoginForm({ users, onLogin }) {
 
   function submit(e) {
     e.preventDefault();
-  const u = users.find((x) => x.email === email && x.password === password);
+  const u = users.find((x) => x.username === email && x.password === password);
   if (!u) return setErr("Credenciales incorrectas");
-  onLogin({ id: u.id, nombre: `${u.nombre} ${u.apellidos}`.trim(), email: u.email, rol: u.rol, productos: u.productos || [], grupo: u.grupo||'' });
+  onLogin({ id: u.id, nombre: `${u.nombre} ${u.apellidos}`.trim(), username: u.username, rol: u.rol, productos: u.productos || [], grupo: u.grupo||'' });
   }
 
   return (
   <form onSubmit={submit} className="space-y-3">
-      <div>
-        <label className="text-sm">Correo</label>
-  <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#3a4750] rounded-xl px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-[#ea9216]" placeholder="tucorreo@maya.com" />
+  <div>
+    <label className="text-sm">Usuario</label>
+  <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#3a4750] rounded-xl px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-[#ea9216]" placeholder="usuario" />
       </div>
       <div>
         <label className="text-sm">Contraseña</label>
@@ -614,11 +704,11 @@ function LoginForm({ users, onLogin }) {
 // ---------------------- Sidebar ----------------------
 function Sidebar({ session, onLogout, view, setView }) {
   return (
-  <aside className="w-[280px] bg-[#273947] border-r border-[#0f171e] p-4 flex flex-col gap-4">
+  <aside className="w-full md:w-[250px] lg:w-[280px] bg-[#273947] border-r border-[#0f171e] p-4 flex flex-col gap-4">
       <div className="flex items-center gap-3">
   <div className="w-10 h-10 rounded-2xl bg-[#ea9216] grid place-items-center text-[#313841] font-black">M</div>
   <div>
-          <div className="font-semibold leading-tight">MAYA Ventas</div>
+          <div className="font-semibold leading-tight">Maya Ventas</div>
           <div className="text-xs text-neutral-400">{session.nombre}</div>
         </div>
       </div>
@@ -633,8 +723,7 @@ function Sidebar({ session, onLogout, view, setView }) {
         )}
         {session.rol === 'admin' && (
           <>
-            <button onClick={() => setView('create-user')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'create-user' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><UserPlus className={"w-4 h-4 "+(view==='create-user'? 'text-[#273947]' : 'text-white')} /> Crear Usuario</button>
-            <button onClick={() => setView('users-list')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'users-list' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Settings className={"w-4 h-4 "+(view==='users-list'? 'text-[#273947]' : 'text-white')} /> Usuarios existentes</button>
+            <button onClick={() => setView('create-user')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'create-user' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><UserPlus className={"w-4 h-4 "+(view==='create-user'? 'text-[#273947]' : 'text-white')} /> Usuarios</button>
           </>
         )}
         <button onClick={() => setView('register-sale')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition " + (view === 'register-sale' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><ShoppingCart className={"w-4 h-4 "+(view==='register-sale'? 'text-[#273947]' : 'text-white')} /> Registrar venta</button>
@@ -642,26 +731,27 @@ function Sidebar({ session, onLogout, view, setView }) {
           <button onClick={() => setView('products')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition " + (view === 'products' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='products'? 'text-[#273947]' : 'text-white')} /> Productos</button>
         )}
         {session.rol === 'admin' && <div className="flex items-center gap-2 p-2 rounded-xl hover:bg-neutral-800/60 mt-1 cursor-pointer" onClick={()=>setView('mis-numeros')}><Wallet className="w-4 h-4" /> {view==='mis-numeros' ? <span className="font-semibold text-[#ea9216]">Mis Números</span> : 'Mis Números'}</div>}
-        {session.rol === 'admin' && (
-          <button onClick={()=>setView('frases')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition "+(view==='frases'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}>💬 Frases motivacionales</button>
-        )}
+  {/* Botón 'Frases motivacionales' ocultado a solicitud */}
         <button onClick={()=>setView('config')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition "+(view==='config'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Settings className={"w-4 h-4 "+(view==='config'? 'text-[#273947]' : 'text-white')} /> Configuración</button>
       </nav>
       <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm">
-        <LogOut className="w-4 h-4" /> Salir
+        <LogOut className="w-4 h-4" /> Cerrar Sesion
       </button>
     </aside>
   );
 }
 
 // ---------------------- Main ----------------------
-function Main({ products, setProducts, sales, setSales, session, users }) {
+function Main({ products, setProducts, sales, setSales, session, users, teamMessages, setTeamMessages, depositSnapshots }) {
   const [showSale, setShowSale] = useState(false);
   const lowStock = products.filter((p) => p.stock <= 10);
   const [period, setPeriod] = useState('week'); // 'week' | 'month' | 'quarter'
+  // (Estados de depósito ahora globales en App)
   // Estado para confirmar con costo de delivery
   const [confirmingSale, setConfirmingSale] = useState(null); // id de venta a confirmar
   const [deliveryCost, setDeliveryCost] = useState('');
+  // Doble confirmación cuando el costo ingresado es 0
+  const [zeroCostCheck, setZeroCostCheck] = useState(null); // { id }
   // Edición / carga de comprobante (QR)
   const [editingReceipt, setEditingReceipt] = useState(null); // objeto venta
   const [receiptTemp, setReceiptTemp] = useState(null); // base64 temporal
@@ -671,9 +761,7 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
   const [rsHIni, setRsHIni] = useState('');
   const [rsMIni, setRsMIni] = useState('00');
   const [rsAmpmIni, setRsAmpmIni] = useState('AM');
-  const [rsHFin, setRsHFin] = useState('');
-  const [rsMFin, setRsMFin] = useState('00');
-  const [rsAmpmFin, setRsAmpmFin] = useState('PM');
+  // Hora fin eliminada: ya no se maneja rango, solo hora inicio
 
   // Dataset para KPIs: solo ventas confirmadas. Admin: todas; vendedor: las suyas.
   const userSales = useMemo(() => {
@@ -684,28 +772,84 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
 
   const kpis = useMemo(() => {
     const hoyISO = todayISO();
-    const agg = { total:0, hoy:0, porDia:{} };
+    // Alcance base para totales históricos (confirmadas) mantiene lógica previa (usuario vs admin)
+    const agg = { total:0, porDia:{} };
     userSales.forEach(s=>{
       const bruto = typeof s.total === 'number' ? s.total : (
         (Number(s.precio||0)*Number(s.cantidad||0)) + (s.skuExtra ? (products.find(p=>p.sku===s.skuExtra)?.precio||0)*Number(s.cantidadExtra||0) : 0)
       );
-      const gasto = Number(s.gasto||0);
-      const neto = bruto - gasto; // lo solicitado (después de descontar delivery)
-      agg.total += bruto; // mantenemos acumulado bruto (puede ajustarse si luego se pide neto)
-      if(s.fecha === hoyISO) agg.hoy += neto; // KPI "Ventas de hoy" = neto confirmado
+      agg.total += bruto;
       agg.porDia[s.fecha] = (agg.porDia[s.fecha]||0) + bruto;
     });
+    // Para métricas "hoy" debemos replicar EXACTAMENTE la lógica de Historial (alcance de grupo para no-admin + filas sintéticas de cancelación).
+    let baseSales = sales;
+    if(session.rol !== 'admin'){
+      const myGroup = session.grupo || (users.find(u=>u.id===session.id)?.grupo)||'';
+      if(myGroup){
+        const filtroGrupo = (arr)=> arr.filter(s=>{
+          const vId = s.vendedoraId; if(vId){ const vu = users.find(u=>u.id===vId); return vu? vu.grupo===myGroup:false; }
+          const vu = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (s.vendedora||'').trim().toLowerCase()));
+          return vu? vu.grupo===myGroup:false;
+        });
+        baseSales = filtroGrupo(baseSales);
+      }
+    }
+    const confirmadasHoy = baseSales.filter(s=> s.fecha===hoyISO && ((s.estadoEntrega||'confirmado')==='confirmado' || (s.estadoEntrega==='cancelado' && s.settledAt)));
+    const canceladasCostoHoy = baseSales.filter(s=> s.fecha===hoyISO && s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0)>0)
+      .map(s=> ({ sinteticaCancelada:true, neto:-Number(s.gastoCancelacion||0) }));
+    // Pendientes hoy no suman (neto 0) así que se omiten.
+    let entregasHoy = 0;
+    confirmadasHoy.forEach(s=>{
+      const bruto = typeof s.total === 'number' ? s.total : (
+        (Number(s.precio||0)*Number(s.cantidad||0)) + (s.skuExtra ? (products.find(p=>p.sku===s.skuExtra)?.precio||0)*Number(s.cantidadExtra||0) : 0)
+      );
+      const gasto = Number(s.gasto||0);
+      entregasHoy += (bruto - gasto);
+    });
+    canceladasCostoHoy.forEach(r=> { entregasHoy += r.neto; }); // valores negativos
+    // Productos entregados hoy: cantidades de confirmadas hoy (excluyendo canceladas liquidadas y sintéticas)
+    const productosHoy = confirmadasHoy.filter(s=> (s.estadoEntrega||'confirmado')==='confirmado').reduce((sum,s)=>{
+      return sum + Number(s.cantidad||0) + (s.skuExtra? Number(s.cantidadExtra||0):0);
+    },0);
+    // Por Cobrar: neto de ENTREGAS CONFIRMADAS pendientes de liquidar (sin settledAt) + costos de cancelación pendientes (negativos), excluyendo ciudad Cochabamba.
+    // (Antes sumaba todo el histórico confirmado y por eso era mayor que la suma por ciudades que ves en CitySummary.)
+    const porCobrarBase = sales
+      .filter(s=> !s.settledAt && (s.ciudad||'').toLowerCase() !== 'cochabamba')
+      .reduce((sum,s)=> {
+        const estado = (s.estadoEntrega||'confirmado');
+        if(estado==='confirmado') {
+          const bruto = typeof s.total === 'number' ? s.total : (
+            (Number(s.precio||0)*Number(s.cantidad||0)) + (s.skuExtra ? (products.find(p=>p.sku===s.skuExtra)?.precio||0)*Number(s.cantidadExtra||0) : 0)
+          );
+            const gasto = Number(s.gasto||0);
+            return sum + (bruto - gasto);
+        }
+        if(estado==='cancelado' && Number(s.gastoCancelacion||0) > 0) {
+          return sum - Number(s.gastoCancelacion||0);
+        }
+        return sum;
+      },0);
+    // Sumar snapshots visibles en Confirmar Depósito (aún no confirmados) excluyendo Cochabamba
+    const snapshotPendiente = (depositSnapshots||[])
+      .filter(s=> (s.city||'').toLowerCase() !== 'cochabamba')
+      .reduce((sum,s)=> sum + Number(s.resumen?.totalNeto||0), 0);
+    const porCobrar = porCobrarBase + snapshotPendiente;
     const porDiaData = Object.entries(agg.porDia).sort((a,b)=> a[0].localeCompare(b[0])).map(([fecha,total])=>({fecha,total}));
-    return { total: agg.total, hoy: agg.hoy, tickets: userSales.length, porDiaData };
-  }, [userSales, products]);
+    return { total: agg.total, porCobrar, entregasHoy, productosHoy, tickets: userSales.length, porDiaData };
+  }, [userSales, products, sales, session, users, depositSnapshots]);
 
   function confirmarEntregaConCosto(id, costo){
     setSales(prev => {
       const sale = prev.find(s=>s.id===id);
       if(!sale) return prev;
       // Verificar stock central disponible antes de confirmar
-      const needed = [{ sku: sale.sku, qty: Number(sale.cantidad||0) }];
-  if(sale.skuExtra) needed.push({ sku: sale.skuExtra, qty: Number(sale.cantidadExtra||0) });
+      const needed = [];
+      const prodPrincipal = products.find(p=>p.sku===sale.sku);
+      if(prodPrincipal && !prodPrincipal.sintetico){ needed.push({ sku: sale.sku, qty: Number(sale.cantidad||0) }); }
+      if(sale.skuExtra){
+        const prodExtra = products.find(p=>p.sku===sale.skuExtra);
+        if(prodExtra && !prodExtra.sintetico){ needed.push({ sku: sale.skuExtra, qty: Number(sale.cantidadExtra||0) }); }
+      }
       let ok = true;
       setProducts(curr => {
         for(const n of needed){
@@ -738,18 +882,42 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
   }
   function confirmarConCostoSubmit(e){
     e.preventDefault();
-    if(deliveryCost === '' || isNaN(Number(deliveryCost))) { alert('Ingresa un costo válido'); return; }
-    confirmarEntregaConCosto(confirmingSale, deliveryCost);
+    const raw = (deliveryCost||'').trim();
+    if(raw === ''){
+      // Interpretar vacío como 0 -> doble confirmación
+      setZeroCostCheck({ id: confirmingSale });
+      setConfirmingSale(null);
+      setDeliveryCost(''); // mantener vacío
+      return;
+    }
+    if(isNaN(Number(raw))) { alert('Ingresa un costo válido'); return; }
+    const num = Number(raw);
+    if(num === 0){
+      // Abrir segunda ventana de confirmación para costo cero
+      setZeroCostCheck({ id: confirmingSale });
+      // Mantener el valor para posible edición posterior, pero cerramos el primer modal
+      setConfirmingSale(null);
+      return;
+    }
+    confirmarEntregaConCosto(confirmingSale, num);
     cancelarModalCosto();
   }
-  function cancelarEntrega(id){
-    setSales(prev => {
-      const sale = prev.find(s=>s.id===id);
-      if(!sale) return prev;
-      // No restauramos porque todavía no se había descontado del central (reservado)
-      return prev.filter(s=>s.id!==id);
-    });
+  const [cancelingSale, setCancelingSale] = useState(null); // id
+  const [cancelDeliveryCost, setCancelDeliveryCost] = useState('');
+  function solicitarCancelarEntrega(id){
+    const sale = sales.find(s=>s.id===id);
+    if(!sale) return;
+    setCancelingSale(id);
+    setCancelDeliveryCost('');
   }
+  function confirmarCancelacion(e){
+    e.preventDefault();
+    const costo = cancelDeliveryCost.trim();
+  const nowTs = Date.now();
+  setSales(prev => prev.map(s=> s.id===cancelingSale ? { ...s, estadoEntrega:'cancelado', gastoCancelacion: costo? Number(costo):0, canceladoAt: nowTs } : s));
+    setCancelingSale(null); setCancelDeliveryCost('');
+  }
+  function cerrarCancelacion(){ setCancelingSale(null); setCancelDeliveryCost(''); }
 
   function abrirReprogramar(s){
     setReschedulingSale(s);
@@ -757,27 +925,27 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
     // parse horaEntrega en formato posible "H:MM AM-H:MM PM" o solo inicio
     const range = normalizeRangeTo12(s.horaEntrega||'');
     let inicio = range;
-    let fin = '';
-    if(range.includes('-')) { const [a,b] = range.split('-'); inicio = a.trim(); fin = b.trim(); }
+  if(range.includes('-')) { const [a] = range.split('-'); inicio = a.trim(); }
     const parse12 = part => {
       const m = part.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i); if(!m) return null; return { h:m[1], m:m[2], ap:m[3].toUpperCase() };
     };
     const i = parse12(inicio);
     if(i){ setRsHIni(i.h); setRsMIni(i.m); setRsAmpmIni(i.ap); } else { setRsHIni(''); setRsMIni('00'); setRsAmpmIni('AM'); }
-    const f = parse12(fin);
-    if(f){ setRsHFin(f.h); setRsMFin(f.m); setRsAmpmFin(f.ap); } else { setRsHFin(''); setRsMFin('00'); setRsAmpmFin('PM'); }
   }
 
   function onAddSale(payload) {
     const { sku, cantidad, skuExtra, cantidadExtra } = payload;
     const product = products.find((p) => p.sku === sku);
     if (!product) return alert("Producto no encontrado");
+    const esSintetico = !!product.sintetico;
+    // Forzar cantidad 1 para sintético
+    if(esSintetico && payload.cantidad !== 1){ payload.cantidad = 1; }
     // Ya no descontamos aquí. Validación opcional: que exista stock central suficiente para una futura confirmación.
-    if (product.stock < cantidad) return alert("Stock central insuficiente (no se puede reservar)");
+    if (!esSintetico && product.stock < cantidad) return alert("Stock central insuficiente (no se puede reservar)");
     if (skuExtra && cantidadExtra) {
       const prod2 = products.find(p=>p.sku===skuExtra);
       if(!prod2) return alert('Producto adicional no existe');
-      if(prod2.stock < cantidadExtra) return alert('Stock central insuficiente del adicional');
+      if(!prod2.sintetico && prod2.stock < cantidadExtra) return alert('Stock central insuficiente del adicional');
     }
     const nextSale = { id: uid(), ...payload, estadoEntrega: 'pendiente' };
     setSales([nextSale, ...sales]);
@@ -834,16 +1002,18 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
       {/* KPIs solo para admin */}
       {session.rol === 'admin' && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <KPI icon={<CircleDollarSign className="w-5 h-5 text-[#f09929]" />} label="Ventas de hoy" value={currency(kpis.hoy)} />
-          <KPI icon={<TrendingUp className="w-5 h-5 text-[#f09929]" />} label="Ventas acumuladas" value={currency(kpis.total)} />
-          <KPI icon={<ShoppingCart className="w-5 h-5 text-[#f09929]" />} label="Tickets (mis ventas)" value={kpis.tickets} />
-          <KPI icon={<AlertTriangle className="w-5 h-5 text-[#f09929]" />} label="Bajo stock" value={lowStock.length} />
-        </div>
+          <KPI icon={<CircleDollarSign className="w-5 h-5 text-[#f09929]" />} label="Entregas de hoy" value={currency(kpis.entregasHoy)} />
+          <KPI icon={<TrendingUp className="w-5 h-5 text-[#f09929]" />} label="Por Cobrar" value={currency(kpis.porCobrar)} />
+          <KPI icon={<ShoppingCart className="w-5 h-5 text-[#f09929]" />} label="Productos entregados HOY" value={kpis.productosHoy} />
+  </div>
       )}
 
-      {/* Entregas pendientes por fecha (hoy y futuras) */}
+  {/* Mensajes de equipo (botón flotante) */}
+  <TeamMessagesWidget session={session} users={users} teamMessages={teamMessages} setTeamMessages={setTeamMessages} />
+  {/* Entregas pendientes por fecha (hoy y futuras) */}
+
   {(() => {
-        const allPendRaw = sales.filter(s=> (s.estadoEntrega||'confirmado')==='pendiente')
+  const allPendRaw = sales.filter(s=> (s.estadoEntrega||'confirmado')==='pendiente')
           .map(s=> ({...s, horaEntrega: normalizeRangeTo12(s.horaEntrega||'')}));
         // Filtrar por grupo si es vendedora
         let allPend = allPendRaw;
@@ -872,7 +1042,8 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
           });
         const futuras = allPend.filter(p=>p.fecha>hoy);
         const fechasFuturas = Array.from(new Set(futuras.map(f=>f.fecha))).sort();
-        const productOrder = products.map(p=>p.sku);
+  // Excluir productos sintéticos de las columnas de tablas de pendientes
+  const productOrder = products.filter(p=>!p.sintetico).map(p=>p.sku);
 
   function TablaPendientes({rows, titulo, fechaLabel}){
           if(!rows.length) return null;
@@ -882,7 +1053,8 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
     <h3 className="text-sm font-semibold flex items-center gap-2"><Clock className="w-4 h-4 text-[#f09929]" /> {titulo}</h3>
     {fechaLabel ? <div className="text-[11px] text-neutral-500">{fechaLabel}</div> : <div />}
               </div>
-              <div className="overflow-auto">
+              <div className="overflow-auto -mx-3 md:mx-0 pb-2">
+                <div className="md:hidden text-[10px] text-neutral-500 px-3 pb-1">Desliza horizontalmente para ver todas las columnas →</div>
                 <table className="w-full text-[11px] min-w-[960px]">
                   <thead className="bg-neutral-800/60">
                     <tr>
@@ -914,7 +1086,7 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
                           <td className="p-2 text-left max-w-[160px]">
                             {s.metodo==='Encomienda' ? (
                               <span className="text-[14px]" title={s.destinoEncomienda||'Encomienda'}>{s.destinoEncomienda||''}</span>
-                            ) : null}
+                            ) : (s.motivo ? <span className="text-[12px] text-[#e7922b]" title={s.motivo}>{s.motivo}</span> : null)}
                           </td>
                           <td className="p-2 whitespace-nowrap">{firstName(s.vendedora)||''}</td>
                           {cantidades.map((c,i)=> <td key={i} className="p-2 text-center">{c||''}</td>)}
@@ -932,7 +1104,7 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
                           <td className="p-2">
                             <div className="flex gap-1">
                               <button onClick={()=>abrirModalCosto(s)} title="Confirmar" className="p-1 rounded-lg bg-[#1d2a34] hover:bg-[#274152] border border-[#e7922b]/40 text-[#e7922b]"><Check className="w-3 h-3" /></button>
-                              <button onClick={()=>cancelarEntrega(s.id)} title="Cancelar" className="p-1 rounded-lg bg-neutral-700/60 hover:bg-neutral-700 text-neutral-200 border border-neutral-600"><X className="w-3 h-3" /></button>
+                              <button onClick={()=>solicitarCancelarEntrega(s.id)} title="Cancelar" className="p-1 rounded-lg bg-neutral-700/60 hover:bg-neutral-700 text-neutral-200 border border-neutral-600"><X className="w-3 h-3" /></button>
                             </div>
                           </td>
                           <td className="p-2 text-center">
@@ -999,13 +1171,46 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
                 <button type="button" onClick={cancelarModalCosto} className="px-3 py-2 rounded-xl bg-neutral-700 text-sm">Cancelar</button>
                 <button className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] font-semibold text-sm">Confirmar</button>
               </div>
-              <div className="text-[10px] text-neutral-500">Al confirmar se descontará el stock central y la venta pasará a la ciudad con este gasto.</div>
+              <div className="text-[10px] text-neutral-500">Al confirmar se descontará el stock central y la venta pasará a la ciudad. Deja vacío o ingresa 0 si no hubo costo.</div>
+            </form>
+          </Modal>
+        )}
+        {zeroCostCheck && (
+          <Modal onClose={()=>{ // Volver al primer modal con costo 0 prellenado
+            setConfirmingSale(zeroCostCheck.id);
+            setZeroCostCheck(null);
+            setDeliveryCost('0');
+          }} autoWidth>
+            <div className="w-full max-w-[380px] px-1 space-y-5">
+              <h3 className="text-sm font-semibold text-[#e7922b]">Confirmar costo 0</h3>
+              <p className="text-xs text-neutral-300 leading-relaxed">Has indicado <span className="font-semibold text-neutral-100">0</span> como costo de delivery. ¿Confirmas que esta entrega <span className="font-semibold">no generó ningún gasto</span> de envío?</p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={()=>{ // volver a editar
+                  setConfirmingSale(zeroCostCheck.id); setZeroCostCheck(null); setDeliveryCost('0');
+                }} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs">Volver</button>
+                <button onClick={()=>{ confirmarEntregaConCosto(zeroCostCheck.id, 0); setZeroCostCheck(null); setDeliveryCost(''); }} className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] font-semibold text-xs">Sí, sin costo</button>
+              </div>
+              <div className="text-[10px] text-neutral-500">Esta acción marcará el delivery con costo 0. Si hubo un gasto, vuelve y edita el monto.</div>
+            </div>
+          </Modal>
+        )}
+        {cancelingSale && (
+          <Modal onClose={cerrarCancelacion}>
+            <form onSubmit={confirmarCancelacion} className="space-y-4">
+              <h3 className="text-sm font-semibold text-[#e7922b]">Cancelar Pedido</h3>
+              <div className="text-[11px] text-neutral-300 leading-relaxed">¿Este pedido generó algún costo de delivery que debamos registrar como pérdida?</div>
+              <input type="number" step="0.01" value={cancelDeliveryCost} onChange={e=>setCancelDeliveryCost(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2" placeholder="0.00" />
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={cerrarCancelacion} className="px-3 py-2 rounded-xl bg-neutral-700 text-sm">Volver</button>
+                <button className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-sm">Cancelar Pedido</button>
+              </div>
+              <div className="text-[10px] text-neutral-500">Se marcará como cancelado y se guardará el costo (si lo indicas). No se descuenta stock del central.</div>
             </form>
           </Modal>
         )}
         {editingReceipt && (
           <Modal onClose={()=>{ setEditingReceipt(null); setReceiptTemp(null); }}>
-            <div className="space-y-4 w-[360px]">
+            <div className="space-y-4 w-full max-w-[400px] px-1">
               <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><Upload className="w-4 h-4" /> Comprobante (QR)</h3>
               <div className="space-y-2 text-xs">
                 <div className="text-neutral-400">Venta: <span className="font-semibold text-neutral-200">{editingReceipt.id.slice(-6)}</span></div>
@@ -1045,11 +1250,10 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
             <form onSubmit={e=>{ e.preventDefault();
               const build12 = (h,m,ap)=>{ if(!h) return ''; return `${h}:${m} ${ap}`; };
               const inicio = build12(rsHIni, rsMIni, rsAmpmIni);
-              const fin = build12(rsHFin, rsMFin, rsAmpmFin);
-              const horaEntrega = fin? `${inicio}-${fin}` : inicio;
+              const horaEntrega = inicio; // fin eliminado
               setSales(prev => prev.map(x=> x.id===reschedulingSale.id ? { ...x, fecha: rsFecha, horaEntrega } : x));
               setReschedulingSale(null);
-            }} className="space-y-4 w-[360px]">
+            }} className="space-y-4 w-full max-w-[400px] px-1">
               <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><Clock className="w-4 h-4" /> Reprogramar entrega</h3>
               <div className="space-y-3 text-xs">
                 <div>
@@ -1073,22 +1277,9 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
                   </div>
                 </div>
                 <div>
-                  <label className="block mb-1 text-neutral-400">Hora fin (opcional)</label>
-                  <div className="flex gap-2">
-                    <select value={rsHFin} onChange={e=>setRsHFin(e.target.value)} className="bg-neutral-800 rounded-xl px-2 py-2 text-xs w-16">
-                      <option value="">--</option>
-                      {Array.from({length:12},(_,i)=>i+1).map(h=> <option key={h}>{h}</option>)}
-                    </select>
-                    <select value={rsMFin} onChange={e=>setRsMFin(e.target.value)} className="bg-neutral-800 rounded-xl px-2 py-2 text-xs w-18">
-                      {['00','15','30','45'].map(m=> <option key={m}>{m}</option>)}
-                    </select>
-                    <select value={rsAmpmFin} onChange={e=>setRsAmpmFin(e.target.value)} className="bg-neutral-800 rounded-xl px-2 py-2 text-xs">
-                      <option>AM</option>
-                      <option>PM</option>
-                    </select>
-                  </div>
+                  {/* Hora fin eliminada */}
                 </div>
-                <div className="text-[10px] text-neutral-500">Se actualizará la fecha/horario del pedido pendiente.</div>
+                <div className="text-[10px] text-neutral-500">Se actualizará la fecha y hora del pedido pendiente.</div>
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={()=>setReschedulingSale(null)} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
@@ -1104,209 +1295,302 @@ function Main({ products, setProducts, sales, setSales, session, users }) {
 
 // ---------------------- Admin Create User ----------------------
 function CreateUserAdmin({ users, setUsers, session, products }) {
-  if (session?.rol !== 'admin') {
-    return <div className="flex-1 p-6 text-sm text-neutral-400">No autorizado.</div>;
+  if(session?.rol !== 'admin') return <div className="flex-1 p-6 text-sm text-neutral-400">No autorizado.</div>;
+  const [nombre,setNombre]=useState('');
+  const [apellidos,setApellidos]=useState('');
+  const [celular,setCelular]=useState('');
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [fechaIngreso,setFechaIngreso]=useState(todayISO());
+  const [sueldo,setSueldo]=useState('0');
+  const [diaPago,setDiaPago]=useState(Number(todayISO().slice(-2))); // día del mes
+  const [rol,setRol]=useState('seller');
+  const [grupo,setGrupo]=useState('');
+  const [mensaje,setMensaje]=useState('');
+  const [productosAsignados,setProductosAsignados]=useState([]);
+  const [editingId,setEditingId]=useState(null);
+  const [editData,setEditData]=useState(null);
+  const [deletingUser,setDeletingUser]=useState(null);
+  // Registrar pagos de este mes para evitar parpadeo una vez marcado "Pagado".
+  const [pagosMarcados, setPagosMarcados] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem('ventas.pagados')||'{}'); } catch { return {}; }
+  }); // { userId: 'YYYY-MM' }
+  const [confirmEdit,setConfirmEdit]=useState(null); // { original, updated, diff }
+  useEffect(()=>{ try { localStorage.setItem('ventas.pagados', JSON.stringify(pagosMarcados)); } catch {} }, [pagosMarcados]);
+  const mesClave = ()=> { const d = new Date(); return d.getFullYear()+ '-' + String(d.getMonth()+1).padStart(2,'0'); };
+  function marcarPagado(u){ setPagosMarcados(prev=> ({ ...prev, [u.id]: mesClave() })); }
+  const [payingUser,setPayingUser]=useState(null); // usuario al que se confirma pago hoy
+  function reset(){ setNombre(''); setApellidos(''); setCelular(''); setEmail(''); setPassword(''); setFechaIngreso(todayISO()); setSueldo('0'); setDiaPago(Number(todayISO().slice(-2))); setRol('seller'); setGrupo(''); setProductosAsignados([]); }
+  function submit(e){ e.preventDefault(); setMensaje(''); if(!nombre||!apellidos||!email||!password){ setMensaje('Completa todos'); return; } if(!diaPago || diaPago<1 || diaPago>31){ setMensaje('Día de pago inválido'); return; } if(users.some(u=>u.username===email)){ setMensaje('Ese usuario ya existe'); return; } const nuevo=normalizeUser({ id:uid(), nombre, apellidos, celular, username: email, password, fechaIngreso, sueldo:Number(sueldo||0), diaPago:Number(diaPago), rol, productos: rol==='admin'? [] : productosAsignados, grupo: rol==='admin'? '' : grupo }); setUsers([...users, nuevo]); reset(); setMensaje('Usuario creado'); }
+  function startEdit(u){
+    const legacyDia = u.diaPago || (u.fechaPago? Number(String(u.fechaPago).slice(-2)) : Number(todayISO().slice(-2)));
+    setEditingId(u.id);
+    // Para compatibilidad, usar username en el campo email del formulario de edición
+    setEditData({ ...u, email: u.username || u.email || '', sueldo:String(u.sueldo), diaPago: legacyDia });
   }
-  const [nombre, setNombre] = useState('');
-  const [apellidos, setApellidos] = useState('');
-  const [celular, setCelular] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [fechaIngreso, setFechaIngreso] = useState(todayISO());
-  const [sueldo, setSueldo] = useState('0');
-  const [fechaPago, setFechaPago] = useState(todayISO());
-  const [rol, setRol] = useState('seller');
-  const [grupo, setGrupo] = useState('');
-  const [mensaje, setMensaje] = useState('');
-  const [productosAsignados, setProductosAsignados] = useState([]); // array de SKUs
-
-  function submit(e) {
-    e.preventDefault();
-    setMensaje('');
-    if (!nombre || !apellidos || !email || !password) { setMensaje('Completa todos los campos obligatorios'); return; }
-    if (users.some(u => u.email === email)) { setMensaje('Ese correo ya existe'); return; }
-  const nuevo = normalizeUser({ id: uid(), nombre, apellidos, celular, email, password, fechaIngreso, sueldo: Number(sueldo || 0), fechaPago, rol, productos: rol === 'admin' ? [] : productosAsignados, grupo });
-    setUsers([...users, nuevo]);
-  setNombre(''); setApellidos(''); setCelular(''); setEmail(''); setPassword(''); setFechaIngreso(todayISO()); setSueldo('0'); setFechaPago(todayISO()); setRol('seller'); setProductosAsignados([]); setGrupo('');
-    setMensaje('Usuario creado');
+  function cancelEdit(){ setEditingId(null); setEditData(null); }
+  function saveEdit(e){ if(e) e.preventDefault(); if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; } const updated=users.map(u=> u.id===editData.id? normalizeUser({ ...u, ...editData, grupo: editData.rol==='admin'? '' : (editData.grupo||''), username: editData.email, diaPago:Number(editData.diaPago), sueldo:Number(editData.sueldo||0), productos: editData.rol==='admin'? [] : (editData.productos||[]) }) : u); setUsers(updated); setConfirmEdit(null); cancelEdit(); }
+  function handleEditSubmit(e){ e.preventDefault(); if(!editData) return; if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; } const original = users.find(u=>u.id===editData.id); if(!original) { saveEdit(); return; } // diff simple
+    const fields = ['nombre','apellidos','celular','email','password','rol','grupo','fechaIngreso','diaPago','sueldo'];
+    const diff = fields.map(f=>{ const newVal = f==='email'? editData.email : editData[f]; const oldVal = f==='email'? (original.username||original.email) : (original[f]); if(String(newVal) !== String(oldVal||'')) return { campo:f, antes:String(oldVal||''), despues:String(newVal||'') }; return null; }).filter(Boolean);
+    // productos
+    const oldProd = (original.productos||[]).join(', ');
+    const newProd = (editData.productos||[]).join(', ');
+    if(oldProd !== newProd) diff.push({ campo:'productos', antes: oldProd||'—', despues: newProd||'—' });
+    setConfirmEdit({ original, updated: editData, diff });
   }
-
-
+  function askDelete(u){ if(u.id===session.id){ alert('No puedes eliminar tu propia sesión.'); return; } if(u.id==='admin'){ alert('No puedes eliminar el usuario administrador principal.'); return; } setDeletingUser(u); }
+  function performDelete(){ if(!deletingUser) return; setUsers(users.filter(x=>x.id!==deletingUser.id)); setDeletingUser(null); }
   return (
     <div className="flex-1 p-6">
       <header className="mb-6">
-  <h2 className="text-xl font-semibold flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#f09929]" /> Crear Usuario</h2>
-        <p className="text-sm text-neutral-400">Alta de nuevas vendedoras o admins.</p>
+        <h2 className="text-xl font-semibold flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#f09929]" /> Usuarios</h2>
+        <p className="text-sm text-neutral-400">Crear, editar y eliminar usuarios.</p>
       </header>
-  <div className="max-w-xl rounded-2xl p-5 bg-[#0f171e]">
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Nombre *</label>
-            <input value={nombre} onChange={e=>setNombre(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Apellidos *</label>
-            <input value={apellidos} onChange={e=>setApellidos(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Número de Celular</label>
-            <input value={celular} onChange={e=>setCelular(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Ej: 71234567" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Correo Electrónico *</label>
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="usuario@correo.com" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Contraseña *</label>
-            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Fecha de Ingreso</label>
-            <input type="date" value={fechaIngreso} onChange={e=>setFechaIngreso(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Monto de Sueldo</label>
-            <input type="number" step="0.01" value={sueldo} onChange={e=>setSueldo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="0" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Fecha de Pago</label>
-            <input type="date" value={fechaPago} onChange={e=>setFechaPago(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Rol</label>
-            <select value={rol} onChange={e=>setRol(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
-              <option value="seller">Vendedora</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-neutral-400">Grupo (equipo)</label>
-            <input value={grupo} onChange={e=>setGrupo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Ej: A" />
-          </div>
-          {rol === 'seller' && (
+      <div className="grid lg:grid-cols-2 gap-8 items-start">
+        <div className="max-w-xl rounded-2xl p-5 bg-[#0f171e] border border-neutral-800">
+          <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="text-xs uppercase tracking-wide text-neutral-400">Productos asignados</label>
-              <div className="mt-2 max-h-40 overflow-auto border border-neutral-800 rounded-xl divide-y divide-neutral-800">
-                {products.map(p => {
-                  const checked = productosAsignados.includes(p.sku);
-                  return (
-                    <label key={p.sku} className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-neutral-800/60">
-                      <input type="checkbox" className="accent-white" checked={checked} onChange={()=>{
-                        setProductosAsignados(prev => checked ? prev.filter(s=>s!==p.sku) : [...prev, p.sku]);
-                      }} />
-                      <span>{p.nombre}</span>
-                    </label>
-                  );
-                })}
-                {products.length === 0 && <div className="px-3 py-2 text-neutral-500 text-xs">No hay productos</div>}
-              </div>
-              <div className="text-[10px] text-neutral-500 mt-1">Si no seleccionas, la vendedora no verá productos. (Admin siempre ve todos)</div>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Nombre *</label>
+              <input value={nombre} onChange={e=>setNombre(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
             </div>
-          )}
-          <div className="flex items-center justify-between pt-2">
-            {mensaje && <div className={"text-sm " + (mensaje === 'Usuario creado' ? 'text-green-400' : 'text-red-400')}>{mensaje}</div>}
-            <button className="px-4 py-2 bg-white text-neutral-900 font-semibold rounded-xl">Guardar</button>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Apellidos *</label>
+              <input value={apellidos} onChange={e=>setApellidos(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Celular</label>
+              <input value={celular} onChange={e=>setCelular(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Ej: 71234567" />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Usuario *</label>
+              <input value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="usuario" />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Contraseña *</label>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Ingreso</label>
+                <input type="date" value={fechaIngreso} onChange={e=>setFechaIngreso(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Día de Pago</label>
+                <input type="number" min={1} max={31} value={diaPago} onChange={e=>setDiaPago(Number(e.target.value))} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="1-31" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Sueldo</label>
+                <input type="number" step="0.01" value={sueldo} onChange={e=>setSueldo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Rol</label>
+                <select value={rol} onChange={e=>{ const v=e.target.value; setRol(v); if(v==='admin') setGrupo(''); }} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
+                  <option value="seller">Vendedora</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              {rol==='seller' && (
+                <div>
+                  <label className="text-xs uppercase tracking-wide text-neutral-400">Grupo</label>
+                  <input value={grupo} onChange={e=>setGrupo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Ej: A" />
+                </div>
+              )}
+            </div>
+            {rol==='seller' && (
+              <div>
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Productos asignados</label>
+                <div className="mt-2 max-h-40 overflow-auto border border-neutral-800 rounded-xl divide-y divide-neutral-800">
+                  {products.map(p=>{
+                    const checked=productosAsignados.includes(p.sku);
+                    return (
+                      <label key={p.sku} className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-neutral-800/60">
+                        <input type="checkbox" className="accent-white" checked={checked} onChange={()=> setProductosAsignados(prev=> checked? prev.filter(s=>s!==p.sku): [...prev,p.sku])} />
+                        <span>{p.nombre}</span>
+                      </label>
+                    );
+                  })}
+                  {products.length===0 && <div className="px-3 py-2 text-neutral-500 text-xs">No hay productos</div>}
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-1">
+              {mensaje && <div className={"text-sm "+(mensaje==='Usuario creado'? 'text-green-400':'text-red-400')}>{mensaje}</div>}
+              <button className="px-4 py-2 bg-white text-neutral-900 font-semibold rounded-xl">Guardar</button>
+            </div>
+          </form>
+        </div>
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-neutral-300">Usuarios existentes</h3>
+          <div className="space-y-4 max-w-3xl">
+            {users.map(u=> (
+              <div key={u.id} className="rounded-xl p-4 bg-[#0f171e] border border-neutral-800">
+                {editingId===u.id ? (
+                  <form onSubmit={handleEditSubmit} className="grid md:grid-cols-4 gap-3 text-xs">
+                    <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.nombre} onChange={e=>setEditData({...editData,nombre:e.target.value})} placeholder="Nombre" />
+                    <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.apellidos} onChange={e=>setEditData({...editData,apellidos:e.target.value})} placeholder="Apellidos" />
+                    <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.celular} onChange={e=>setEditData({...editData,celular:e.target.value})} placeholder="Celular" />
+                    <input className="bg-neutral-800 rounded-lg px-2 py-1 md:col-span-2" value={editData.email} onChange={e=>setEditData({...editData,email:e.target.value})} placeholder="Usuario" />
+                    <input type="password" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.password} onChange={e=>setEditData({...editData,password:e.target.value})} placeholder="Contraseña" />
+                    <select className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.rol} onChange={e=>setEditData({...editData,rol:e.target.value})}>
+                      <option value="seller">Vendedora</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    {editData.rol==='seller' && <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.grupo||''} onChange={e=>setEditData({...editData,grupo:e.target.value})} placeholder="Grupo" />}
+                    <input type="date" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.fechaIngreso} onChange={e=>setEditData({...editData,fechaIngreso:e.target.value})} />
+                    <input type="number" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.sueldo} onChange={e=>setEditData({...editData,sueldo:e.target.value})} placeholder="Sueldo" />
+                    <input type="number" min={1} max={31} className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.diaPago} onChange={e=>setEditData({...editData,diaPago:Number(e.target.value)})} placeholder="Día pago" />
+                    {editData.rol==='seller' && (
+                      <div className="md:col-span-4 border border-neutral-800 rounded-lg max-h-32 overflow-auto divide-y divide-neutral-800">
+                        {products.map(p=>{
+                          const checked=(editData.productos||[]).includes(p.sku);
+                          return (
+                            <label key={p.sku} className="flex items-center gap-2 px-3 py-1.5 text-[10px] cursor-pointer hover:bg-neutral-800/60">
+                              <input type="checkbox" className="accent-white" checked={checked} onChange={()=> setEditData(prev=>{ const list=prev.productos||[]; return { ...prev, productos: checked? list.filter(s=>s!==p.sku): [...list,p.sku] }; })} />
+                              <span>{p.sku} · {p.nombre}</span>
+                            </label>
+                          );
+                        })}
+                        {products.length===0 && <div className="px-3 py-2 text-neutral-500 text-xs">No hay productos</div>}
+                      </div>
+                    )}
+                    <div className="flex gap-2 md:col-span-4 justify-end pt-1">
+                      <button type="button" onClick={cancelEdit} className="px-3 py-1 bg-neutral-700 rounded-lg text-[11px]">Cancelar</button>
+                      <button className="px-3 py-1 bg-white text-neutral-900 rounded-lg font-semibold text-[11px]">Guardar</button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex flex-col gap-1 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-medium flex items-center flex-wrap gap-1">
+                        <span>{u.nombre} {u.apellidos}</span>
+                        <span className="text-[9px] ml-1 px-2 py-0.5 rounded-full bg-neutral-700 uppercase tracking-wide">{u.rol}</span>
+                        {u.grupo && <span className="text-[9px] ml-1 px-2 py-0.5 rounded-full bg-neutral-800 uppercase tracking-wide">G:{u.grupo}</span>}
+                        {(() => {
+                          const hoyDia = Number(todayISO().slice(-2));
+                          const now = new Date();
+                          const diasMes = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+                          const dia = u.diaPago || Number(String(u.fechaPago||'').slice(-2));
+                          if(!dia) return null;
+                          let diff = dia - hoyDia; // días hasta próximo pago
+                          if(diff < 0) diff = (diasMes - hoyDia) + dia;
+                          const pagado = pagosMarcados[u.id] === mesClave();
+                          const esHoy = diff===0;
+                          // Estados:
+                          // - esHoy & !pagado => rojo parpadeo
+                          // - esHoy & pagado => verde
+                          // - diff>7 & pagado => verde
+                          // - 1<=diff<=7 => naranja (advertencia próxima) independientemente de pagado anterior
+                          // - resto => sin indicador
+                          if(esHoy){
+                            const color = pagado ? '#16a34a' : '#dc2626';
+                            const blinkClass = !pagado ? 'blink-red' : '';
+                            const title = pagado ? 'Pago registrado hoy' : 'Pago HOY';
+                            return <span title={title} className={"ml-1 w-2.5 h-2.5 rounded-full inline-block "+blinkClass} style={{background:color, boxShadow:`0 0 4px ${color}`}} />;
+                          }
+                          if(diff>=1 && diff<=7){
+                            const title = diff===1 ? 'Pago en 1 día' : `Pago en ${diff} días`;
+                            const color = '#f59e0b';
+                            return <span title={title} className="ml-1 w-2.5 h-2.5 rounded-full inline-block" style={{background:color, boxShadow:`0 0 4px ${color}`}} />;
+                          }
+                          if(diff>7 && pagado){
+                            const color = '#16a34a';
+                            return <span title="Pago al día" className="ml-1 w-2.5 h-2.5 rounded-full inline-block" style={{background:color, boxShadow:`0 0 4px ${color}`}} />;
+                          }
+                          return null;
+                        })()}
+                        {(() => {
+                          const hoyDia = Number(todayISO().slice(-2));
+                          const now = new Date();
+                          const diasMes = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+                          const dia = u.diaPago || Number(String(u.fechaPago||'').slice(-2));
+                          if(!dia) return null;
+                          let diff = dia - hoyDia; if(diff < 0) diff = (diasMes - hoyDia) + dia;
+                          const esHoy = diff===0; if(!esHoy) return null;
+                          const yaPagadoEsteMes = pagosMarcados[u.id] === mesClave();
+                          if(yaPagadoEsteMes) return null;
+                          return <button type="button" onClick={()=>setPayingUser(u)} className="ml-1 px-2 py-0.5 rounded-full bg-neutral-700 hover:bg-neutral-600 text-[9px] font-medium">Pagado</button>;
+                        })()}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={()=>startEdit(u)} className="text-[11px] px-2 py-1 bg-neutral-700 rounded-lg">Editar</button>
+                        <button onClick={()=>askDelete(u)} className="text-[11px] px-2 py-1 bg-red-600/80 hover:bg-red-600 rounded-lg">Eliminar</button>
+                      </div>
+                    </div>
+                    <div className="text-neutral-400 text-[11px]">{u.username} · Cel: {u.celular || '—'}</div>
+                    {u.rol==='seller' && <div className="text-neutral-500 text-[10px] mt-1">Productos: {(u.productos||[]).length===0 ? 'Ninguno' : u.productos.join(', ')}</div>}
+                    <div className="text-neutral-500 text-[10px]">Ingreso: {toDMY(u.fechaIngreso)} · Pago: Día {u.diaPago || Number(String(u.fechaPago).slice(-2))} · Sueldo: {currency(u.sueldo||0)}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {users.length===0 && <div className="text-neutral-500 text-sm">No hay usuarios.</div>}
           </div>
-        </form>
+        </div>
       </div>
+      <AnimatePresence>
+        {deletingUser && (
+          <Modal onClose={()=>setDeletingUser(null)} autoWidth>
+            <div className="w-full max-w-[360px] px-1 space-y-4">
+              <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><UserPlus className="w-4 h-4" /> Eliminar usuario</h3>
+              <p className="text-xs text-neutral-300 leading-relaxed">¿Eliminar a <span className="font-semibold text-neutral-100">{deletingUser.nombre} {deletingUser.apellidos}</span>? Esta acción no se puede deshacer.</p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={()=>setDeletingUser(null)} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+                <button onClick={performDelete} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold">Eliminar</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {confirmEdit && (
+          <Modal onClose={()=>setConfirmEdit(null)} autoWidth>
+            <div className="w-full max-w-[430px] px-1 space-y-4">
+              <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><Settings className="w-4 h-4" /> Confirmar cambios</h3>
+              {confirmEdit.diff.length===0 ? (
+                <div className="text-xs text-neutral-400">No hay cambios para guardar.</div>
+              ) : (
+                <div className="max-h-48 overflow-auto border border-neutral-800 rounded-lg divide-y divide-neutral-800 text-[11px] bg-neutral-900/40">
+                  {confirmEdit.diff.map(d=> (
+                    <div key={d.campo} className="px-3 py-2 flex flex-col gap-1">
+                      <div className="font-semibold text-neutral-300 uppercase text-[10px] tracking-wide">{d.campo}</div>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="line-through text-neutral-500 break-all">{d.antes||'—'}</div>
+                        <div className="text-[#e7922b] break-all">{d.despues||'—'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="text-[10px] text-neutral-500">Revisa y confirma para aplicar los cambios. Los datos originales se perderán al guardar.</div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={()=>setConfirmEdit(null)} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+                <button disabled={confirmEdit.diff.length===0} onClick={saveEdit} className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold disabled:opacity-40">Confirmar</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {payingUser && (
+          <Modal onClose={()=>setPayingUser(null)} autoWidth>
+            <div className="w-full max-w-[360px] px-1 space-y-4">
+              <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2"><CircleDollarSign className="w-4 h-4" /> Confirmar Pago</h3>
+              <p className="text-xs text-neutral-300 leading-relaxed">¿Marcar pago de <span className="font-semibold text-neutral-100">{payingUser.nombre} {payingUser.apellidos}</span> como realizado hoy?</p>
+              <div className="text-[10px] text-neutral-500">Esto mostrará un indicador verde hasta 7 días antes del próximo pago.</div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={()=>setPayingUser(null)} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+                <button onClick={()=>{ marcarPagado(payingUser); setPayingUser(null); }} className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Confirmar</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 // ---------------------- Admin Users List ----------------------
-function UsersListAdmin({ users, setUsers, session, products }) {
-  if (session?.rol !== 'admin') {
-    return <div className="flex-1 p-6 text-sm text-neutral-400">No autorizado.</div>;
-  }
-  const [editingId, setEditingId] = useState(null);
-  const [editData, setEditData] = useState(null);
+// UsersListAdmin eliminado (fusionado en CreateUserAdmin)
 
-  function startEdit(u) {
-    setEditingId(u.id);
-  setEditData({ ...u, sueldo: String(u.sueldo) });
-  }
-  function cancelEdit() { setEditingId(null); setEditData(null); }
-  function saveEdit(e) {
-    e.preventDefault();
-    if (!editData.nombre || !editData.apellidos || !editData.email) return;
-    if (users.some(u => u.email === editData.email && u.id !== editData.id)) { alert('Correo ya usado'); return; }
-  const updated = users.map(u => u.id === editData.id ? normalizeUser({ ...u, ...editData, sueldo: Number(editData.sueldo || 0), productos: editData.rol === 'admin' ? [] : (editData.productos || []) }) : u);
-    setUsers(updated);
-    cancelEdit();
-  }
-  return (
-    <div className="flex-1 p-6">
-      <header className="mb-6">
-  <h2 className="text-xl font-semibold flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#f09929]" /> Crear Usuario</h2>
-        <p className="text-sm text-neutral-400">Alta de nuevas vendedoras o admins.</p>
-      </header>
-      <div className="space-y-4 max-w-5xl">
-        {users.map(u => (
-          <div key={u.id} className="rounded-xl p-4 bg-[#0f171e]">
-            {editingId === u.id ? (
-              <form onSubmit={saveEdit} className="grid md:grid-cols-4 gap-3 text-sm">
-                <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.nombre} onChange={e=>setEditData({...editData,nombre:e.target.value})} placeholder="Nombre" />
-                <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.apellidos} onChange={e=>setEditData({...editData,apellidos:e.target.value})} placeholder="Apellidos" />
-                <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.celular} onChange={e=>setEditData({...editData,celular:e.target.value})} placeholder="Celular" />
-                <input className="bg-neutral-800 rounded-lg px-2 py-1 md:col-span-2" value={editData.email} onChange={e=>setEditData({...editData,email:e.target.value})} placeholder="Correo" />
-                <input type="password" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.password} onChange={e=>setEditData({...editData,password:e.target.value})} placeholder="Contraseña" />
-                <select className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.rol} onChange={e=>setEditData({...editData,rol:e.target.value})}>
-                  <option value="seller">Vendedora</option>
-                  <option value="admin">Admin</option>
-                </select>
-                <input className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.grupo||''} onChange={e=>setEditData({...editData,grupo:e.target.value})} placeholder="Grupo" />
-                <input type="date" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.fechaIngreso} onChange={e=>setEditData({...editData,fechaIngreso:e.target.value})} />
-                <input type="number" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.sueldo} onChange={e=>setEditData({...editData,sueldo:e.target.value})} placeholder="Sueldo" />
-                <input type="date" className="bg-neutral-800 rounded-lg px-2 py-1" value={editData.fechaPago} onChange={e=>setEditData({...editData,fechaPago:e.target.value})} />
-                {editData.rol === 'seller' && (
-                  <div className="md:col-span-4 border border-neutral-800 rounded-lg max-h-40 overflow-auto divide-y divide-neutral-800">
-                    {products.map(p => {
-                      const checked = (editData.productos || []).includes(p.sku);
-                      return (
-                        <label key={p.sku} className="flex items-center gap-2 px-3 py-1.5 text-[11px] cursor-pointer hover:bg-neutral-800/60">
-                          <input type="checkbox" className="accent-white" checked={checked} onChange={()=>{
-                            setEditData(prev => {
-                              const list = prev.productos || [];
-                              return {
-                                ...prev,
-                                productos: checked ? list.filter(s=>s!==p.sku) : [...list, p.sku]
-                              };
-                            });
-                          }} />
-                          <span>{p.sku} · {p.nombre}</span>
-                        </label>
-                      );
-                    })}
-                    {products.length === 0 && <div className="px-3 py-2 text-neutral-500 text-xs">No hay productos</div>}
-                  </div>
-                )}
-                <div className="flex gap-2 md:col-span-4 justify-end pt-1">
-                  <button type="button" onClick={cancelEdit} className="px-3 py-1 bg-neutral-700 rounded-lg text-xs">Cancelar</button>
-                  <button className="px-3 py-1 bg-white text-neutral-900 rounded-lg font-semibold text-xs">Guardar</button>
-                </div>
-              </form>
-            ) : (
-              <div className="flex flex-col gap-1 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium">{u.nombre} {u.apellidos} <span className="text-[10px] ml-2 px-2 py-0.5 rounded-full bg-neutral-700 uppercase tracking-wide">{u.rol}</span>{u.grupo && <span className="text-[10px] ml-2 px-2 py-0.5 rounded-full bg-neutral-800 uppercase tracking-wide">G:{u.grupo}</span>}</div>
-                  <div className="flex gap-2">
-                    <button onClick={()=>startEdit(u)} className="text-xs px-2 py-1 bg-neutral-700 rounded-lg">Editar</button>
-                  </div>
-                </div>
-                <div className="text-neutral-400 text-xs">{u.email} · Cel: {u.celular || '—'}</div>
-                {u.rol === 'seller' && (
-                  <div className="text-neutral-500 text-[10px] mt-1">Productos: {(u.productos || []).length === 0 ? 'Ninguno asignado' : u.productos.join(', ')}</div>
-                )}
-                <div className="text-neutral-500 text-[11px]">Ingreso: {toDMY(u.fechaIngreso)} · Pago: {toDMY(u.fechaPago)} · Sueldo: {currency(u.sueldo || 0)}</div>
-              </div>
-            )}
-          </div>
-        ))}
-        {users.length === 0 && <div className="text-neutral-500 text-sm">No hay usuarios.</div>}
-      </div>
-    </div>
-  );
-}
 
 // ---------------------- Productos ----------------------
 function ProductsView({ products, setProducts, session }) {
@@ -1315,7 +1599,12 @@ function ProductsView({ products, setProducts, session }) {
   const [precio, setPrecio] = useState('');
   const [costo, setCosto] = useState('');
   const [stock, setStock] = useState('');
-  const [imagen, setImagen] = useState(null); // base64
+  // imagenBase64 se mantiene sólo para compatibilidad con productos previos
+  const [imagenBase64, setImagenBase64] = useState(null);
+  const [imagenUrl, setImagenUrl] = useState(null); // Cloudinary secure_url
+  const [imagenId, setImagenId] = useState(null); // Cloudinary public_id
+  const [subiendo, setSubiendo] = useState(false);
+  const [sintetico, setSintetico] = useState(false); // producto sin precio/costo/stock
   const [mensaje, setMensaje] = useState('');
   const [editingSku, setEditingSku] = useState(null);
   const [filter, setFilter] = useState('');
@@ -1324,7 +1613,7 @@ function ProductsView({ products, setProducts, session }) {
 
   useEffect(()=>{ setUsage(estimateLocalStorageUsage()); }, [products]);
 
-  function resetForm() { setSku(''); setNombre(''); setPrecio(''); setCosto(''); setStock(''); setImagen(null); setEditingSku(null); }
+  function resetForm() { setSku(''); setNombre(''); setPrecio(''); setCosto(''); setStock(''); setImagenBase64(null); setImagenUrl(null); setImagenId(null); setEditingSku(null); setSintetico(false); setSubiendo(false); }
 
   function submit(e) {
     e.preventDefault();
@@ -1334,8 +1623,8 @@ function ProductsView({ products, setProducts, session }) {
     if (!generatedSku) {
       generatedSku = nombre.toUpperCase().replace(/[^A-Z0-9]+/g,'-').slice(0,8) + '-' + Math.random().toString(36).slice(2,5).toUpperCase();
     }
-    const exists = products.find(p => p.sku === generatedSku);
-  const data = { id: exists ? exists.id : uid(), sku: generatedSku, nombre: nombre.trim(), precio: Number(precio||0), costo: Number(costo||0), stock: Number(stock||0), imagen: imagen || (exists ? exists.imagen : null) };
+  const exists = products.find(p => p.sku === generatedSku);
+  const data = { id: exists ? exists.id : uid(), sku: generatedSku, nombre: nombre.trim(), precio: sintetico?0:Number(precio||0), costo: sintetico?0:Number(costo||0), stock: sintetico?0:Number(stock||0), imagen: imagenBase64 || (exists ? exists.imagen : null), imagenUrl: imagenUrl || (exists ? exists.imagenUrl : null), imagenId: imagenId || (exists ? exists.imagenId : null), sintetico: sintetico?true:undefined };
     if (exists && editingSku) {
       setProducts(products.map(p => p.sku === editingSku ? data : p));
   setMensaje('Producto actualizado');
@@ -1343,7 +1632,8 @@ function ProductsView({ products, setProducts, session }) {
   setMensaje('Nombre genera código existente, intenta variar el nombre');
       return;
     } else {
-      setProducts([data, ...products]);
+  // Agregar al final para mantener orden cronológico (primero creado arriba)
+  setProducts([...products, data]);
       setMensaje('Producto agregado');
     }
     resetForm();
@@ -1351,7 +1641,7 @@ function ProductsView({ products, setProducts, session }) {
 
   function edit(p) {
     setEditingSku(p.sku);
-    setSku(p.sku); setNombre(p.nombre); setPrecio(String(p.precio)); setCosto(String(p.costo)); setStock(String(p.stock)); setImagen(p.imagen || null);
+  setSku(p.sku); setNombre(p.nombre); setPrecio(String(p.precio)); setCosto(String(p.costo)); setStock(String(p.stock)); setImagenBase64(p.imagen || null); setImagenUrl(p.imagenUrl || null); setImagenId(p.imagenId || null); setSintetico(!!p.sintetico);
   }
   function remove(p) {
     if (!confirm('¿Eliminar producto ' + p.sku + '?')) return;
@@ -1359,6 +1649,7 @@ function ProductsView({ products, setProducts, session }) {
     if (editingSku === p.sku) resetForm();
   }
 
+  // Mantener orden de creación: no ordenar; solo filtrar
   const filtered = products.filter(p => [p.sku, p.nombre].join(' ').toLowerCase().includes(filter.toLowerCase()));
 
   return (
@@ -1379,59 +1670,71 @@ function ProductsView({ products, setProducts, session }) {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs uppercase tracking-wide text-neutral-400">Precio</label>
-                <input type="number" step="0.01" value={precio} onChange={e=>setPrecio(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+                <input disabled={sintetico} type="number" step="0.01" value={precio} onChange={e=>setPrecio(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-40" />
               </div>
               <div>
                 <label className="text-xs uppercase tracking-wide text-neutral-400">Costo</label>
-                <input type="number" step="0.01" value={costo} onChange={e=>setCosto(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+                <input disabled={sintetico} type="number" step="0.01" value={costo} onChange={e=>setCosto(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-40" />
               </div>
               <div>
                 <label className="text-xs uppercase tracking-wide text-neutral-400">Stock</label>
-                <input type="number" value={stock} onChange={e=>setStock(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+                <input disabled={sintetico} type="number" value={stock} onChange={e=>setStock(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-40" />
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input id="chkSint" type="checkbox" checked={sintetico} onChange={e=>setSintetico(e.target.checked)} className="w-4 h-4" />
+              <label htmlFor="chkSint" className="text-[11px] text-neutral-400 select-none">Producto sintético (sin precio / costo / stock)</label>
             </div>
             <div>
               <label className="text-xs uppercase tracking-wide text-neutral-400">Imagen</label>
-              <input type="file" accept="image/*" onChange={(e)=>{
+              <input type="file" accept="image/*" disabled={subiendo} onChange={async (e)=>{
                 const file = e.target.files?.[0];
-                if(!file) { setImagen(null); return; }
-                // Compresión inteligente: reducir hasta <=60KB objetivo
-                const targetKB = 60;
-                const img = new Image();
-                const reader = new FileReader();
-                reader.onload = ev=> {
-                  img.onload = () => {
-                    try {
-                      const canvas = document.createElement('canvas');
-                      let { width, height } = img;
-                      const maxSide = 500;
-                      if (width > maxSide || height > maxSide) {
-                        const scale = Math.min(maxSide / width, maxSide / height);
-                        width = Math.round(width * scale);
-                        height = Math.round(height * scale);
-                      }
-                      canvas.width = width; canvas.height = height;
-                      const ctx = canvas.getContext('2d');
-                      ctx.drawImage(img, 0, 0, width, height);
-                      let quality = 0.7; let data;
-                      for(; quality >= 0.3; quality -= 0.1){
-                        data = canvas.toDataURL('image/jpeg', quality);
-                        if((data.length/1024) <= targetKB) break;
-                      }
-                      setImagen(data);
-                    } catch { }
+                if(!file){ setImagenBase64(null); setImagenUrl(null); setImagenId(null); return; }
+                setMensaje('Procesando imagen...');
+                // Pequeña compresión previa para ahorrar ancho de banda
+                const compress = (file) => new Promise(res=>{
+                  const img = new Image();
+                  const rd = new FileReader();
+                  rd.onload = ev => {
+                    img.onload = () => {
+                      try {
+                        let { width, height } = img; const maxSide = 800;
+                        if(width>maxSide||height>maxSide){
+                          const scale=Math.min(maxSide/width,maxSide/height); width=Math.round(width*scale); height=Math.round(height*scale);
+                        }
+                        const canvas=document.createElement('canvas'); canvas.width=width; canvas.height=height; const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0,width,height);
+                        canvas.toBlob(b=>res(b), 'image/jpeg', 0.8);
+                      } catch { res(file); }
+                    };
+                    if(typeof ev.target.result==='string') img.src=ev.target.result;
                   };
-                  if (typeof ev.target?.result === 'string') img.src = ev.target.result;
-                };
-                reader.readAsDataURL(file);
+                  rd.readAsDataURL(file);
+                });
+                try {
+                  setSubiendo(true);
+                  const blob = await compress(file) || file;
+                  // Subir a Cloudinary
+                  const formFile = new File([blob], file.name.replace(/\.[a-zA-Z0-9]+$/, '') + '.jpg', { type: 'image/jpeg' });
+                  const { uploadProductImage } = await import('./cloudinary.js');
+                  const up = await uploadProductImage(formFile, { folder: 'productos' });
+                  setImagenUrl(up.secure_url); setImagenId(up.public_id); setImagenBase64(null);
+                  setMensaje('Imagen subida');
+                } catch(err){
+                  // Fallback: mantener base64 local si falla firma / red
+                  setMensaje('Fallo subida, usando local');
+                  const reader = new FileReader();
+                  reader.onload = ev => { if(typeof ev.target.result==='string') setImagenBase64(ev.target.result); };
+                  reader.readAsDataURL(file);
+                } finally { setSubiendo(false); }
               }} className="w-full mt-1 text-xs" />
-              {imagen && (
+              {(imagenUrl || imagenBase64) && (
                 <div className="mt-2 flex items-center gap-3">
-                  <img src={imagen} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-neutral-700" />
-                  <button type="button" onClick={()=>setImagen(null)} className="text-xs text-red-400 underline">Quitar</button>
+                  <img src={imagenUrl || imagenBase64} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-neutral-700" />
+                  <button type="button" onClick={()=>{ setImagenBase64(null); setImagenUrl(null); setImagenId(null); }} className="text-xs text-red-400 underline">Quitar</button>
                 </div>
               )}
-              <div className="text-[10px] text-neutral-500 mt-1">Las imágenes se comprimen (máx 500px, objetivo &lt;=60KB). Si sigues llenando el espacio puedes optimizar o quitar todas.</div>
+              <div className="text-[10px] text-neutral-500 mt-1">Las nuevas imágenes se suben a la nube (Cloudinary). Si falla la red se guarda local comprimida.</div>
+              {subiendo && <div className="text-[10px] text-neutral-400 mt-1">Subiendo...</div>}
             </div>
             {mensaje && <div className={"text-xs " + (mensaje.includes('agregado') || mensaje.includes('actualizado') ? 'text-green-400' : 'text-red-400')}>{mensaje}</div>}
             <div className="flex gap-2 justify-end">
@@ -1442,11 +1745,11 @@ function ProductsView({ products, setProducts, session }) {
           <div className="mt-6 space-y-2 text-[11px] text-neutral-500 border-t border-neutral-800 pt-4">
             <div>Uso almacenamiento aprox: {(usage/1024).toFixed(0)} KB (límite típico ~5000 KB)</div>
             <div className="flex gap-2 flex-wrap">
-              <button disabled={optimizing} onClick={async()=>{
+        <button disabled={optimizing} onClick={async()=>{
                 setOptimizing(true);
                 // Re-comprimir todas las imágenes existentes con parámetros más agresivos
                 const recompress = async (p)=> new Promise(res=>{
-                  if(!p.imagen) return res(p);
+          if(!p.imagen || p.imagenUrl) return res(p); // no tocar las ya migradas a nube
                   const img = new Image();
                   img.onload = () => {
                     try {
@@ -1481,7 +1784,7 @@ function ProductsView({ products, setProducts, session }) {
               }} className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50">{optimizing?'Optimizando...':'Optimizar imágenes'}</button>
               <button onClick={()=>{
                 if(!confirm('Esto quitará TODAS las imágenes de productos para liberar espacio. ¿Continuar?')) return;
-                setProducts(products.map(p=> ({...p, imagen: null})));
+                setProducts(products.map(p=> ({...p, imagen: null, imagenUrl: null, imagenId: null})));
               }} className="px-3 py-1 rounded-lg bg-red-700/80 hover:bg-red-700">Quitar todas</button>
             </div>
           </div>
@@ -1509,7 +1812,7 @@ function ProductsView({ products, setProducts, session }) {
                   const margen = p.precio ? ((p.precio - p.costo) / p.precio) * 100 : 0;
                   return (
                     <tr key={p.sku} className="border-t border-neutral-800">
-            <td className="p-3">{p.imagen ? <img src={p.imagen} alt={p.nombre} className="w-10 h-10 object-cover rounded-md border border-neutral-700" /> : <div className="w-10 h-10 rounded-md bg-neutral-800 grid place-items-center text-[10px] text-neutral-500">N/A</div>}</td>
+            <td className="p-3">{(p.imagenUrl || p.imagen) ? <img src={p.imagenUrl || p.imagen} alt={p.nombre} className="w-10 h-10 object-cover rounded-md border border-neutral-700" /> : <div className="w-10 h-10 rounded-md bg-neutral-800 grid place-items-center text-[10px] text-neutral-500">N/A</div>}</td>
                       <td className="p-3">{p.nombre}</td>
                       <td className="p-3 text-right">{currency(p.precio)}</td>
                       <td className="p-3 text-right">{currency(p.costo)}</td>
@@ -1543,6 +1846,8 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
   const [ciudad, setCiudad] = useState(ciudades[0]);
   // Campo notas removido según requerimiento
   const [lineItems, setLineItems] = useState(() => products.map(p => ({ sku: p.sku, cantidad: 0 })));
+  // Edición de despacho pendiente
+  const [editId, setEditId] = useState(null);
   const [filtroCiudad, setFiltroCiudad] = useState('');
 
   // Re-sincroniza lineItems si cambia catálogo (mantiene cantidades existentes)
@@ -1577,22 +1882,44 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
         return;
       }
     }
-  const record = { id: uid(), fecha, ciudad, items, status: 'pendiente' };
-  setDispatches([record, ...dispatches]);
+    if(editId){
+      // Actualizar existente (mantener status original)
+      setDispatches(prev => prev.map(d=> d.id===editId ? { ...d, fecha, ciudad, items } : d));
+    } else {
+      const record = { id: uid(), fecha, ciudad, items, status: 'pendiente' };
+      setDispatches([record, ...dispatches]);
+    }
   // Stock se descuenta solo al confirmar
     // Reset cantidades
     setLineItems(lineItems.map(l=>({...l,cantidad:0})));
+    setEditId(null);
   // notas removido
   }
 
-  const productosColumns = products;
+  function startEdit(d){
+    // Solo permitir editar pendientes
+    if(d.status==='confirmado') return;
+    setEditId(d.id);
+    setFecha(d.fecha);
+    setCiudad(d.ciudad);
+    // Cargar cantidades
+    setLineItems(prev => prev.map(li => {
+      const found = d.items.find(it=>it.sku===li.sku);
+      return { ...li, cantidad: found? found.cantidad : 0 };
+    }));
+  }
+
+  // Excluir productos sintéticos de las columnas de inventario/despachos
+  const productosColumns = products.filter(p=>!p.sintetico);
   const [fechaDesdeConf, setFechaDesdeConf] = useState('');
   const [fechaHastaConf, setFechaHastaConf] = useState('');
   const [pageConf, setPageConf] = useState(1);
   // Pendientes: no se filtran por ciudad ni fechas
-  const dispatchesPendientes = dispatches.filter(d=> d.status !== 'confirmado');
-  // Confirmados base
-  const dispatchesConfirmadosBase = dispatches.filter(d=> d.status === 'confirmado');
+  const dispatchesPendientes = dispatches.filter(d=> d.status !== 'confirmado')
+    .slice().sort((a,b)=> b.fecha.localeCompare(a.fecha)); // más reciente arriba
+  // Confirmados base (ordenar más reciente primero)
+  const dispatchesConfirmadosBase = dispatches.filter(d=> d.status === 'confirmado')
+    .slice().sort((a,b)=> b.fecha.localeCompare(a.fecha));
   const dispatchesConfirmadosFiltrados = dispatchesConfirmadosBase.filter(d=> (
     (!filtroCiudad || d.ciudad === filtroCiudad) &&
     (!fechaDesdeConf || d.fecha >= fechaDesdeConf) && (!fechaHastaConf || d.fecha <= fechaHastaConf)
@@ -1640,7 +1967,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
             </div>
             <div>
               <label className="text-xs uppercase tracking-wide text-neutral-400">Cantidades por producto</label>
-              <div className="mt-2 max-h-52 overflow-auto border border-neutral-800 rounded-xl divide-y divide-neutral-800">
+              <div className="mt-2 border border-neutral-800 rounded-xl divide-y divide-neutral-800">
                 {productosColumns.map(p=>{
                   const li = lineItems.find(l=>l.sku===p.sku) || {cantidad:0};
                   return (
@@ -1661,7 +1988,10 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
             </div>
             {/* Notas removido */}
             <div className="flex justify-end">
-              <button className="px-4 py-2 bg-white text-neutral-900 font-semibold rounded-xl">Despachar</button>
+              <div className="flex items-center gap-2">
+                {editId && <button type="button" onClick={()=>{ setEditId(null); setLineItems(lineItems.map(l=>({...l,cantidad:0}))); setFecha(todayISO()); setCiudad(ciudades[0]); }} className="px-4 py-2 bg-neutral-700 text-neutral-200 font-semibold rounded-xl text-xs">Cancelar</button>}
+                <button className="px-4 py-2 bg-white text-neutral-900 font-semibold rounded-xl">{editId? 'Actualizar' : 'Despachar'}</button>
+              </div>
             </div>
           </form>
         </div>
@@ -1726,7 +2056,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                         <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-yellow-600/20 text-yellow-400 border border-yellow-600/40">Esperando confirmación</span>
                       </td>
                       <td className="p-2">
-                        <button onClick={()=>undoDispatch(d)} className="px-2 py-1 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-[10px]">Deshacer</button>
+                        <button onClick={()=>startEdit(d)} className="px-2 py-1 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-[10px]">Editar</button>
                       </td>
                     </tr>
                   ))}
@@ -1766,7 +2096,6 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                       <th className="p-2 text-left">Fecha</th>
                       <th className="p-2 text-left">Ciudad</th>
                       {productosColumns.map(p=> <th key={p.sku} className="p-2 text-right whitespace-nowrap max-w-[140px]">{p?.nombre.split(' ')[0]}</th>)}
-                      <th className="p-2 text-left">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1778,12 +2107,9 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                           const it = d.items.find(i=>i.sku===p.sku);
                           return <td key={p.sku} className="p-2 text-right">{it?it.cantidad: ''}</td>;
                         })}
-                        <td className="p-2">
-                          <button onClick={()=>undoDispatch(d)} className="px-2 py-1 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-[10px]">Deshacer</button>
-                        </td>
                       </tr>
                     ))}
-                    {dispatchesConfirmadosFiltrados.length===0 && <tr><td colSpan={productosColumns.length+3} className="p-4 text-center text-neutral-500">Sin confirmados en el rango</td></tr>}
+                    {dispatchesConfirmadosFiltrados.length===0 && <tr><td colSpan={productosColumns.length+2} className="p-4 text-center text-neutral-500">Sin confirmados en el rango</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -1806,10 +2132,11 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
 // Despachos pendientes para ciudad con opción de confirmar o cancelar
 function CityPendingShipments({ city, dispatches, setDispatches, products, session }) {
   const pendientes = dispatches.filter(d=>d.ciudad===city && d.status==='pendiente');
-  const [openId, setOpenId] = useState(null); // popup abierto
+  const [openId, setOpenId] = useState(null); // id abierto
+  const [openPos, setOpenPos] = useState(null); // posición del botón lupa
   useEffect(()=>{
     if(!openId) return;
-    function handleKey(e){ if(e.key==='Escape'){ setOpenId(null); } }
+  function handleKey(e){ if(e.key==='Escape'){ setOpenId(null); setOpenPos(null);} }
     window.addEventListener('keydown', handleKey);
     return ()=> window.removeEventListener('keydown', handleKey);
   }, [openId]);
@@ -1827,7 +2154,6 @@ function CityPendingShipments({ city, dispatches, setDispatches, products, sessi
         <div className="flex items-start gap-3">
            <div>
              <div className="text-sm font-semibold flex items-center gap-2"><MapPin className="w-4 h-4 text-[#f09929]" /> {city}</div>
-             <div className="text-xs text-neutral-500">{pendientes.length} envíos pendientes • Total {currency(pendientes.reduce((a,f)=>a+f.total,0))}</div>
            </div>
         </div>
       </div>
@@ -1838,7 +2164,7 @@ function CityPendingShipments({ city, dispatches, setDispatches, products, sessi
             <div key={d.id} className="relative bg-neutral-800/40 border border-neutral-700 rounded-xl p-3 flex flex-col gap-2 w-full md:w-auto min-w-[180px]">
               <div className="text-[10px] uppercase tracking-wide text-neutral-400 font-medium truncate">{toDMY(d.fecha)}</div>
               <div className="flex items-center gap-2">
-                <button onClick={()=> setOpenId(abierto?null:d.id)} className="shrink-0 text-neutral-300 hover:text-[#e7922b] transition" title="Ver detalle">
+                <button onClick={(e)=> { if(abierto){ setOpenId(null); setOpenPos(null);} else { const rect = e.currentTarget.getBoundingClientRect(); setOpenPos(rect); setOpenId(d.id);} }} className="shrink-0 text-neutral-300 hover:text-[#e7922b] transition" title="Ver detalle">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                 </button>
                 <div className="text-base font-semibold text-[#e7922b] tracking-wide">Por llegar</div>
@@ -1851,26 +2177,33 @@ function CityPendingShipments({ city, dispatches, setDispatches, products, sessi
               ) : (
                 <div className="text-[10px] text-neutral-500">Pendiente de aprobación</div>
               )}
-              {abierto && (
-                <div className="absolute z-30 -top-2 left-1/2 -translate-x-1/2 -translate-y-full w-64 rounded-xl bg-[#10161e] border border-neutral-700 p-3 shadow-xl flex flex-col gap-2">
-                  <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-[#10161e] border-b border-r border-neutral-700 rotate-45"></div>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-[10px] font-semibold text-neutral-400">Por llegar – {city}</div>
-                    <button onClick={()=>setOpenId(null)} className="text-[10px] px-2 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600">Cerrar</button>
-                  </div>
-                  <div className="max-h-40 overflow-auto pr-1 space-y-2">
-                    {d.items.map(it=>{
-                      const prod = products.find(p=>p.sku===it.sku);
-                      return (
-                        <div key={it.sku} className="flex items-center justify-between gap-4 text-[15px] leading-snug bg-neutral-800/60 px-3 py-2 rounded-lg border border-neutral-700/60">
-                          <span className="truncate max-w-[150px]" title={prod?prod.nombre:it.sku}>{prod?prod.nombre:it.sku}</span>
-                          <span className="text-[#e7922b] font-bold">{it.cantidad}</span>
+              {abierto && openPos && (
+                <>
+                  <div className="fixed inset-0 z-40 bg-black/50" onClick={()=>{ setOpenId(null); setOpenPos(null); }} />
+                  {(() => {
+                    const style = { position:'fixed', top: (openPos.bottom + 8) + 'px', left: openPos.left + 'px' };
+                    return (
+                      <div style={style} className="z-50 w-[92vw] sm:w-64 max-h-[60vh] overflow-auto bg-[#10161e] border border-neutral-700 rounded-xl shadow-2xl p-3 flex flex-col gap-2 animate-fade-in">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[10px] font-semibold text-[#e7922b]">Por llegar – {city}</div>
+                          <button onClick={()=>{ setOpenId(null); setOpenPos(null); }} className="text-[10px] px-2 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600">Cerrar</button>
                         </div>
-                      );
-                    })}
-                    {!d.items.length && <div className="text-[10px] text-neutral-500">Sin items</div>}
-                  </div>
-                </div>
+                        <div className="space-y-2 pr-1">
+                          {d.items.map(it=>{
+                            const prod = products.find(p=>p.sku===it.sku);
+                            return (
+                              <div key={it.sku} className="flex items-center justify-between gap-4 text-[15px] leading-snug bg-neutral-800/60 px-3 py-2 rounded-lg border border-neutral-700/60">
+                                <span className="truncate max-w-[160px]" title={prod?prod.nombre:it.sku}>{prod?prod.nombre:it.sku}</span>
+                                <span className="text-[#e7922b] font-bold">{it.cantidad}</span>
+                              </div>
+                            );
+                          })}
+                          {!d.items.length && <div className="text-[10px] text-neutral-500">Sin items</div>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
               )}
             </div>
           );
@@ -1881,7 +2214,7 @@ function CityPendingShipments({ city, dispatches, setDispatches, products, sessi
 }
 
 // --- AGREGAR: CityStock (faltaba y causaba ReferenceError en VentasView) ---
-function CityStock({ city, products, sales, dispatches }) {
+function CityStock({ city, products, sales, dispatches, setSales, session }) {
   if(!city) return null;
   const confirmados = Array.isArray(dispatches) ? dispatches.filter(d=>d.ciudad===city && d.status==='confirmado') : [];
   const enviados = {};
@@ -1897,73 +2230,141 @@ function CityStock({ city, products, sales, dispatches }) {
       if(s.sku) vendidos[s.sku] = (vendidos[s.sku]||0) + Number(s.cantidad||0);
       if(s.skuExtra) vendidos[s.skuExtra] = (vendidos[s.skuExtra]||0) + Number(s.cantidadExtra||0);
     });
-
-  const rows = products.map(p=>{
+  // Pedidos pendientes (reservados por entregar)
+  const pendientes = {};
+  sales
+    .filter(s=>s.ciudad===city && (s.estadoEntrega||'')==='pendiente')
+    .forEach(s=>{
+      if(s.sku) pendientes[s.sku] = (pendientes[s.sku]||0) + Number(s.cantidad||0);
+  // Ya no contamos SKU extra como "por entregar" para evitar mostrar reservas que el usuario no ve como pedido principal.
+    });
+  const rows = products.filter(p=>!p.sintetico).map(p=> {
     const sent = enviados[p.sku]||0;
     const sold = vendidos[p.sku]||0;
-    const disp = sent - sold;
-    if(!sent && !sold) return null; // mostrar solo si hubo movimiento
-    return { sku:p.sku, nombre:p.nombre, enviados:sent, vendidos:sold, disponible:disp };
+    const pend = pendientes[p.sku]||0;
+    const disp = sent - sold - pend; // disponible real considerando pendientes
+    if(!sent && !sold && !pend) return null; // mostrar solo si hubo movimiento o pendiente
+    return { sku: p.sku, nombre: p.nombre, enviados: sent, vendidos: sold, pendiente: pend, disponible: disp };
   }).filter(Boolean);
-
   if(!rows.length) return null;
-
   const [showRaw, setShowRaw] = useState(false);
-  // Cerrar popup raw con ESC
-  useEffect(()=>{
-    if(!showRaw) return; // solo cuando está abierto
-    function onKey(e){ if(e.key==='Escape'){ setShowRaw(false); } }
-    window.addEventListener('keydown', onKey);
-    return ()=> window.removeEventListener('keydown', onKey);
-  }, [showRaw]);
+  const btnRef = useRef(null);
+  const [openedAt, setOpenedAt] = useState(null);
+  // Nuevo: sku para mostrar detalle de pendientes específicos
+  const [pendingDetailSku, setPendingDetailSku] = useState(null);
+  function removePending(id){
+    if(!session || session.rol!=='admin') return;
+    if(!confirm('¿Eliminar este pedido pendiente?')) return;
+    setSales(prev => prev.filter(s=> s.id!==id));
+  }
+  useEffect(()=>{ if(showRaw && !openedAt) setOpenedAt(new Date()); }, [showRaw, openedAt]);
+  useEffect(()=>{ if(!showRaw) return; function onKey(e){ if(e.key==='Escape') setShowRaw(false); } window.addEventListener('keydown', onKey); return ()=> window.removeEventListener('keydown', onKey); }, [showRaw]);
   const sumEnviado = Object.values(enviados).reduce((a,b)=>a+b,0);
   return (
     <div className="rounded-2xl p-4 bg-[#0f171e] mb-6 relative">
-      <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
-        <button onClick={()=>setShowRaw(v=>!v)} title="Ver total enviado confirmado (sin descontar ventas pendientes)" className={"p-1 rounded-lg border border-neutral-700/60 hover:bg-neutral-700/40 transition " + (showRaw? 'bg-neutral-700/40':'')}> 
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-neutral-300"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
-        </button>
-        <Package className="w-4 h-4 text-[#f09929]" /> Stock en {city}
-      </h3>
-      {showRaw && (
-        <div className="absolute z-30 top-10 left-2 w-[340px] max-h-[360px] overflow-auto bg-[#10161e] border border-neutral-700 rounded-xl shadow-xl p-3 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] font-semibold text-neutral-300">Stock {city} (sin descontar pendientes)</div>
-            <button onClick={()=>setShowRaw(false)} className="text-[10px] px-2 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600">Cerrar</button>
-          </div>
-          <div className="space-y-2">
-            {Object.entries(enviados).map(([sku,cant])=>{
-              const prod = products.find(p=>p.sku===sku);
-              return (
-                <div key={sku} className="flex items-center justify-between gap-4 text-[15px] leading-snug bg-neutral-800/60 px-3 py-2 rounded-lg border border-neutral-700/60">
-                  <span className="truncate max-w-[200px]" title={prod?prod.nombre:sku}>{prod?prod.nombre:sku}</span>
-                  <span className="text-[#e7922b] font-bold">{cant}</span>
-                </div>
-              );
-            })}
-            {!Object.keys(enviados).length && <div className="text-[11px] text-neutral-500">Sin envíos confirmados.</div>}
-          </div>
-          <div className="text-[15px] text-neutral-500 pt-1">Total en Stock: <span className="text-[#e7922b] font-semibold">{sumEnviado}</span></div>
-        </div>
-      )}
-      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-        {rows.map(r=> {
-          const color = 'text-[#e7922b]';
-          return (
-            <div key={r.sku} className="rounded-xl bg-neutral-800/40 border border-neutral-700/60 px-3 py-3 flex flex-col gap-2 min-h-[90px]">
-              <div className="text-[11px] font-medium leading-snug line-clamp-2" title={r.nombre}>{r.nombre}</div>
-              <div className="mt-auto">
-                <div className={"text-2xl font-bold leading-none "+color}>{r.disponible}</div>
-                <div className="mt-1 flex gap-3 text-[9px] text-neutral-500">
-                  <span>Env {r.enviados}</span>
-                  <span>Ven {r.vendidos}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <button ref={btnRef} onClick={()=>{ setShowRaw(true); }} className="p-1 rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 relative" title="Ver detalle">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          </button>
+          <Package className="w-4 h-4 text-[#f09929]" /> Stock en {city}
+        </h3>
+        <div></div>
       </div>
-      <div className="mt-3 text-[10px] text-neutral-500">Disponible = Enviado confirmado - Vendido confirmado.</div>
+      {showRaw && (
+        <>
+          {/* Backdrop */}
+          <div onClick={()=>setShowRaw(false)} className="fixed inset-0 z-40 bg-black/50" />
+          {(() => {
+            // Posicionar bajo la lupa (fallback centrado si no existe)
+            let style = {};
+            if(btnRef.current){
+              const rect = btnRef.current.getBoundingClientRect();
+              style = { position:'fixed', top: rect.bottom + 8 + 'px', left: rect.left + 'px' };
+            } else {
+              style = { position:'fixed', top:'80px', left:'50%', transform:'translateX(-50%)' };
+            }
+            const fh = openedAt || new Date();
+            const fecha = fh.toLocaleDateString('es-PE',{day:'2-digit',month:'2-digit',year:'numeric'});
+            return (
+              <div style={style} className="z-50 w-[92vw] sm:w-[420px] max-h-[70vh] overflow-auto bg-[#10161e] border border-neutral-700 rounded-xl shadow-2xl p-3 flex flex-col gap-3 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-semibold text-[#e7922b]">Stock {city} {fecha}</div>
+                  <button onClick={()=>setShowRaw(false)} className="text-[10px] px-2 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600">Cerrar</button>
+                </div>
+                <div className="space-y-2">
+                  {Object.entries(enviados).map(([sku,cant])=>{
+                    const prod = products.find(p=>p.sku===sku);
+                    return (
+                      <div key={sku} className="flex items-center justify-between gap-4 text-[15px] leading-snug bg-neutral-800/60 px-3 py-2 rounded-lg border border-neutral-700/60">
+                        <span className="truncate max-w-[200px]" title={prod?prod.nombre:sku}>{prod?prod.nombre:sku}</span>
+                        <span className="text-[#e7922b] font-bold">{cant}</span>
+                      </div>
+                    );
+                  })}
+                  {!Object.keys(enviados).length && <div className="text-[11px] text-neutral-500">Sin envíos confirmados.</div>}
+                </div>
+                <div className="text-[15px] text-neutral-500 pt-1">Total en Stock: <span className="text-[#e7922b] font-semibold">{sumEnviado}</span></div>
+              </div>
+            );
+          })()}
+        </>
+      )}
+      <div className="flex flex-wrap gap-3">
+        {rows.map(r=> (
+          <div key={r.sku} className="w-[140px] rounded-xl bg-neutral-800/40 border border-neutral-700/60 px-3 py-2 flex flex-col gap-1 min-h-[70px]">
+            <div className="text-[11px] font-medium leading-snug truncate" title={r.nombre}>{r.nombre}</div>
+            <div className="flex items-end gap-2 mt-auto">
+              <div>
+                <div className={"text-2xl font-bold leading-none "+(r.disponible<0? 'text-red-400':'text-[#e7922b]')}>{r.disponible}</div>
+                <div className="text-[9px] text-neutral-500 mt-0.5">Disponible</div>
+              </div>
+              {r.pendiente > 0 && (
+                <button onClick={()=>setPendingDetailSku(r.sku)} className="text-right group cursor-pointer">
+                  <div className="text-[9px] text-neutral-500 group-hover:text-neutral-300 transition">Por entregar</div>
+                  <div className="text-sm font-semibold text-[#e7922b] leading-none mt-0.5">{r.pendiente}</div>
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+  </div>
+      {pendingDetailSku && (()=>{
+        const pendList = sales.filter(s=> s.ciudad===city && (s.estadoEntrega||'')==='pendiente' && s.sku===pendingDetailSku);
+        const prod = products.find(p=>p.sku===pendingDetailSku);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60" onClick={()=>setPendingDetailSku(null)} />
+            <div className="relative z-10 w-full max-w-sm bg-[#10161e] border border-neutral-700 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-[#e7922b]">Pendientes · {prod?prod.nombre:pendingDetailSku}</div>
+                <button onClick={()=>setPendingDetailSku(null)} className="text-[11px] px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600">Cerrar</button>
+              </div>
+              {pendList.length>0 ? (
+                <div className="space-y-2 max-h-60 overflow-auto pr-1">
+                  {pendList.map(p=> (
+                    <div key={p.id} className="flex items-center gap-2 text-[11px] bg-neutral-800/60 px-3 py-2 rounded-lg border border-neutral-700/60">
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="truncate" title={p.fecha+ ' '+ (p.horaEntrega||'')}>{toDMY(p.fecha)} {(p.horaEntrega||'')}</span>
+                        {p.notas && <span className="text-[9px] text-neutral-500 truncate" title={p.notas}>{p.notas}</span>}
+                      </div>
+                      <span className="text-[#e7922b] font-semibold">{p.cantidad}</span>
+                      {session?.rol==='admin' && (
+                        <button onClick={()=>removePending(p.id)} className="ml-1 p-1 rounded bg-red-600/70 hover:bg-red-600 text-white" title="Borrar pendiente">
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[11px] text-neutral-500">Sin pendientes (refresca la página si persiste el número).</div>
+              )}
+              <div className="text-[10px] text-neutral-500">Se cuentan solo pedidos con estado pendiente donde este producto es principal. {session?.rol==='admin' && 'Puedes borrar manualmente si detectas un registro fantasma.'}</div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1986,7 +2387,7 @@ function MisNumerosView({ products, numbers, setNumbers }) {
     setMsg('');
     if(!sku) return setMsg('Selecciona producto');
     if(sku==='otros' && !otherName.trim()) return setMsg('Nombre requerido para Otros');
-    if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return setMsg('Correo inválido');
+  if(!email) return setMsg('Usuario requerido');
     if(!celular) return setMsg('Celular requerido');
     if(!caduca) return setMsg('Fecha de caducidad requerida');
     if(editingId){
@@ -2092,8 +2493,8 @@ function MisNumerosView({ products, numbers, setNumbers }) {
               </div>
             )}
             <div>
-              <label className="text-xs uppercase tracking-wide text-neutral-400">Correo electrónico</label>
-              <input value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="correo@ejemplo.com" />
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Usuario</label>
+              <input value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="usuario" />
             </div>
             <div>
               <label className="text-xs uppercase tracking-wide text-neutral-400">Número de celular</label>
@@ -2121,7 +2522,7 @@ function MisNumerosView({ products, numbers, setNumbers }) {
               <thead className="bg-neutral-800/60">
                 <tr>
                   <th className="p-2 text-left">Producto</th>
-                  <th className="p-2 text-left">Correo</th>
+                  <th className="p-2 text-left">Usuario</th>
                   <th className="p-2 text-left">Celular</th>
                   <th className="p-2 text-left">Caducidad</th>
                   <th className="p-2 text-center">Días</th>
@@ -2172,7 +2573,7 @@ function MisNumerosView({ products, numbers, setNumbers }) {
 }
 
 // ---------------------- Historial (vista de ventas confirmadas + gráfico) ----------------------
-function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
+function HistorialView({ sales, products, session, users=[], onOpenReceipt, onGoDeposit }) {
   const [period, setPeriod] = useState('week'); // 'week' | 'month' | 'quarter'
   const [tableFilter, setTableFilter] = useState('all'); // all | today | week | month
   const [cityFilter, setCityFilter] = useState('all');
@@ -2180,34 +2581,59 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
   const [dateEnd, setDateEnd] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
-  // Confirmadas base
-  let confirmadas = sales.filter(s=> (s.estadoEntrega||'confirmado')==='confirmado');
+  // Confirmadas verdaderas (para gráfico)
+  const confirmedBase = sales.filter(s=> (s.estadoEntrega||'confirmado')==='confirmado');
+  // Base para tabla: confirmadas + canceladas liquidadas + canceladas con costo (todas) + pendientes
+  let confirmadas = sales.filter(s=> (s.estadoEntrega||'confirmado')==='confirmado' || ((s.estadoEntrega==='cancelado') && s.settledAt));
+  const canceladasConCosto = sales.filter(s=> s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0) > 0)
+    .map(s=> ({
+      ...s,
+      id: s.id+':canc',
+      total: 0,
+      gasto: Number(s.gastoCancelacion||0),
+      neto: -Number(s.gastoCancelacion||0),
+      cantidad: 0,
+      cantidadExtra: 0,
+      sku: '',
+      skuExtra: '',
+      sinteticaCancelada: true,
+      confirmadoAt: s.confirmadoAt || s.canceladoAt || 0
+    }));
+  confirmadas = [...confirmadas, ...canceladasConCosto];
+  const pendientesTabla = sales.filter(s=> (s.estadoEntrega||'')==='pendiente').map(s=> ({ ...s, esPendiente:true, neto:0 }));
+  let tablaVentas = [...confirmadas, ...pendientesTabla];
   if(session?.rol !== 'admin') {
     const myGroup = session.grupo || (users.find(u=>u.id===session.id)?.grupo)||'';
     if(myGroup){
-      confirmadas = confirmadas.filter(s=>{
-        const vId = s.vendedoraId;
-        if(vId){
-          const vu = users.find(u=>u.id===vId);
-          return vu? vu.grupo===myGroup : false;
-        }
+      const filtroGrupo = (arr)=> arr.filter(s=>{
+        const vId = s.vendedoraId; if(vId){ const vu = users.find(u=>u.id===vId); return vu? vu.grupo===myGroup:false; }
         const vu = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (s.vendedora||'').trim().toLowerCase()));
-        return vu? vu.grupo===myGroup : false;
+        return vu? vu.grupo===myGroup:false;
       });
+      confirmadas = filtroGrupo(confirmadas);
+      tablaVentas = filtroGrupo(tablaVentas);
     }
   }
 
-  const rows = useMemo(()=> confirmadas
-    .slice() // copiar
-    .sort((a,b)=> (b.confirmadoAt||0) - (a.confirmadoAt||0))
+  const rows = useMemo(()=> tablaVentas
+    .slice()
+    .sort((a,b)=> {
+      // Orden principal: momento de confirmación / cancelación (más reciente primero).
+      const ta = a.confirmadoAt || a.canceladoAt || 0;
+      const tb = b.confirmadoAt || b.canceladoAt || 0;
+      if(tb !== ta) return tb - ta;
+      // Pendientes (sin timestamp) quedarán abajo; como fallback usar fecha (desc) y luego id.
+      if(a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+      return (b.id||'').localeCompare(a.id||'');
+    })
     .map(s=>{
       const p1 = products.find(p=>p.sku===s.sku);
       const p2 = s.skuExtra ? products.find(p=>p.sku===s.skuExtra) : null;
       const total = Number(s.total != null ? s.total :
         (Number(s.precio||0)*Number(s.cantidad||0) +
          (s.skuExtra ? (products.find(p=>p.sku===s.skuExtra)?.precio||0)*Number(s.cantidadExtra||0) : 0)));
-      const gasto = Number(s.gasto||0);
-      return {
+  const gasto = Number(s.gasto||0);
+  return {
         id:s.id,
         fecha:s.fecha,
         hora:s.horaEntrega||'',
@@ -2218,18 +2644,23 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
   cantidades:[s.cantidad, s.cantidadExtra].filter(v=>v!=null).join(' + '),
         total,
         gasto,
-        neto: total - gasto,
+    neto: s.sinteticaCancelada ? (s.neto != null ? s.neto : (total - gasto)) : (total - gasto),
         metodo:s.metodo,
         celular:s.celular||'',
   comprobante:s.comprobante,
   destinoEncomienda: s.destinoEncomienda,
+  motivo: s.motivo,
   // conservar campos originales para totales por producto
   sku: s.sku,
   cantidad: s.cantidad,
   skuExtra: s.skuExtra,
-  cantidadExtra: s.cantidadExtra
+ cantidadExtra: s.cantidadExtra,
+ sinteticaCancelada: !!s.sinteticaCancelada,
+ gastoCancelacion: s.gastoCancelacion,
+ esPendiente: !!s.esPendiente,
+ estadoEntrega: s.estadoEntrega || (s.esPendiente?'pendiente':'confirmado')
       };
-    }), [confirmadas, products]);
+  }), [tablaVentas, products]);
 
   // --- Filtros para tabla ---
   const hoy = todayISO();
@@ -2267,10 +2698,19 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
   return (
     <div className="flex-1 p-6 bg-[#121f27] overflow-auto space-y-6">
       <header className="mb-2">
-        <h2 className="text-xl font-semibold flex items-center gap-2">
-          <History className="w-5 h-5 text-[#f09929]" /> Historial de Ventas
-        </h2>
-        <p className="text-sm text-neutral-400">Ventas confirmadas y análisis temporal.</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <History className="w-5 h-5 text-[#f09929]" /> Historial de Ventas
+            </h2>
+            <p className="text-sm text-neutral-400">Ventas confirmadas y análisis temporal.</p>
+          </div>
+          {session?.rol==='admin' && (
+            <div className="flex gap-2">
+              <button onClick={onGoDeposit} className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold shadow hover:brightness-110 active:scale-[0.98]">Confirmar depósito</button>
+            </div>
+          )}
+        </div>
       </header>
 
       {session?.rol==='admin' && (
@@ -2289,7 +2729,7 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
               <option value="quarter">Trimestre</option>
             </select>
           </div>
-          <ChartVentas period={period} sales={confirmadas} />
+          <ChartVentas period={period} sales={confirmadas} products={products} />
         </div>
       )}
 
@@ -2326,9 +2766,11 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
           </div>
           <div className="ml-auto text-[10px] text-neutral-500">{filteredRows.length} / {rows.length} registros · Página {safePage} de {totalPages}</div>
         </div>
-        <div className="overflow-auto">
+        <div className="overflow-auto -mx-3 md:mx-0 pb-2">
+          <div className="md:hidden text-[10px] text-neutral-500 px-3 pb-1">Desliza horizontalmente para ver la tabla →</div>
         {(() => {
-          const productOrder = products.map(p=>p.sku);
+          // Excluir productos sintéticos de las columnas de la tabla de ventas confirmadas
+          const productOrder = products.filter(p=>!p.sintetico).map(p=>p.sku);
           // Totales para página actual (no global) para consistencia con CitySummary; podría cambiarse a filteredRows si se desea global filtrado
           const pageTotals = (()=>{
             const skuTotals = {};
@@ -2362,28 +2804,32 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt }) {
               </thead>
               <tbody>
                 {pageRows.map(r=>{
-                  const cantidades = productOrder.map(sku=>{ let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
+                  const cantidades = productOrder.map(sku=>{ if(r.sinteticaCancelada) return 0; let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
                   return (
-                    <tr key={r.id} className="border-t border-neutral-800">
+                    <tr key={r.id} className={"border-t border-neutral-800 "+(r.sinteticaCancelada? 'bg-red-900/10':'')}>
                       <td className="p-2">{toDMY(r.fecha)}</td>
                       <td className="p-2">{r.hora}</td>
                       <td className="p-2">{r.ciudad}</td>
-                      <td className="p-2 text-left max-w-[160px]">{r.metodo==='Encomienda'? <span className="text-[14px]" title={r.destinoEncomienda||''}>{r.destinoEncomienda||''}</span>: ''}</td>
+                      <td className="p-2 text-left max-w-[160px]">{r.metodo==='Encomienda'? <span className="text-[14px]" title={r.destinoEncomienda||''}>{r.destinoEncomienda||''}</span>: (r.motivo? <span className="text-[12px] text-[#e7922b]" title={r.motivo}>{r.motivo}</span> : '')}</td>
                       <td className="p-2 whitespace-nowrap">{firstName(r.vendedor)}</td>
                       {cantidades.map((c,i)=> <td key={i} className="p-2 text-center">{c||''}</td>)}
-                      <td className="p-2 text-right font-semibold">{currency(r.total)}</td>
-                      <td className="p-2 text-right">{r.gasto?currency(r.gasto):''}</td>
-                      <td className="p-2 text-right font-semibold">{currency(r.neto)}</td>
+                      <td className={"p-2 text-right font-semibold "+(r.sinteticaCancelada? 'text-red-400':'')}>{currency(r.total)}</td>
+                      <td className={"p-2 text-right "+(r.sinteticaCancelada? 'text-red-400':'')}>{r.gasto?currency(r.gasto):''}</td>
+                      <td className={"p-2 text-right font-semibold "+(r.sinteticaCancelada? 'text-red-400':'')}>{currency(r.neto)}</td>
                       <td className="p-2 text-center">{r.celular||''}</td>
                       <td className="p-2 text-center">
-                        {r.comprobante && (
-                          <button
-                            onClick={()=>{ const sale = confirmadas.find(s=>s.id===r.id); if(sale && onOpenReceipt) onOpenReceipt(sale); }}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded bg-[#1d2a34] hover:bg-[#253341] border border-[#e7922b]/40"
-                            title="Ver comprobante"
-                          >
-                            <Search className="w-3 h-3 text-[#e7922b]" />
-                          </button>
+                        {r.sinteticaCancelada ? (
+                          <span className="text-[10px] font-semibold text-red-400">Cancelado</span>
+                        ) : (
+                          r.comprobante && (
+                            <button
+                              onClick={()=>{ const sale = confirmadas.find(s=>s.id===r.id); if(sale && onOpenReceipt) onOpenReceipt(sale); }}
+                              className="inline-flex items-center justify-center w-6 h-6 rounded bg-[#1d2a34] hover:bg-[#253341] border border-[#e7922b]/40"
+                              title="Ver comprobante"
+                            >
+                              <Search className="w-3 h-3 text-[#e7922b]" />
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>
@@ -2433,12 +2879,164 @@ function KPI({ icon, label, value }) {
   );
 }
 
-function ChartVentas({ period, sales }) {
-  // Agrupar según periodo seleccionado
+
+// Widget flotante: botón + modal
+function TeamMessagesWidget({ session, users, teamMessages, setTeamMessages }) {
+  const myGroup = (users.find(u=>u.id===session.id)?.grupo) || session.grupo || '';
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  // Para admin: selección de grupo a visualizar y a enviar
+  const isAdmin = session?.rol === 'admin';
+  const allGroups = useMemo(()=> Array.from(new Set(users.map(u=>u.grupo).filter(Boolean))).sort(), [users]);
+  const [viewGroup, setViewGroup] = useState(isAdmin ? '__ALL__' : myGroup);
+  const [sendGroup, setSendGroup] = useState(isAdmin ? '' : myGroup);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  if(!isAdmin && !myGroup) return null; // vendedora sin grupo -> ocultar
+  // Mensajes visibles
+  const visibleMsgs = (isAdmin && viewGroup==='__ALL__') ? teamMessages.slice() : teamMessages.filter(m=> m.grupo === (isAdmin? viewGroup : myGroup));
+  const msgs = visibleMsgs.sort((a,b)=> b.createdAt - a.createdAt);
+  // Unread (admin cuenta sobre TODOS los mensajes)
+  const unread = (isAdmin ? teamMessages : msgs).filter(m=> m.authorId!==session.id && !m.readBy.includes(session.id)).length;
+  function send(){
+    const targetGroup = isAdmin ? sendGroup : myGroup;
+    const t = text.trim(); if(!t) return; if(!targetGroup){ alert('Selecciona un grupo'); return; }
+    if(t.length>500){ alert('Máx 500 caracteres'); return; }
+    const authorNombre = (session.nombre||'') + ' ' + (session.apellidos||'');
+    const msg = { id: uid(), grupo: targetGroup, authorId: session.id, authorNombre: authorNombre.trim(), text:t, createdAt: Date.now(), readBy: [session.id] };
+    setTeamMessages(prev=> [msg, ...prev]);
+    setText('');
+    if(isAdmin && viewGroup!=='__ALL__' && targetGroup!==viewGroup){
+      // Si admin envió a otro grupo distinto al actualmente filtrado (no ALL), podríamos cambiar filtro; lo mantenemos.
+    }
+  }
+  function markRead(id){ setTeamMessages(prev=> prev.map(m=> m.id===id && !m.readBy.includes(session.id)? { ...m, readBy:[...m.readBy, session.id] }: m)); }
+  function remove(id){ setTeamMessages(prev=> prev.filter(m=>m.id!==id)); if(confirmDeleteId===id) setConfirmDeleteId(null); }
+  useEffect(()=>{ setConfirmDeleteId(null); }, [viewGroup, open]);
+  return (
+    <>
+      <button onClick={()=>setOpen(true)} className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-[#e7922b] text-[#1a2430] font-bold shadow-lg flex items-center justify-center hover:brightness-110 active:scale-95">
+        <MessageSquare className="w-6 h-6" />
+        {unread>0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">{unread}</span>}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <Modal onClose={()=>setOpen(false)}>
+            <div className="w-[380px] max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2"><MessageSquare className="w-4 h-4 text-[#f09929]" /> Mensajes de Equipo</h3>
+                {!isAdmin && <div className="text-[10px] text-neutral-500">Grupo: {myGroup}</div>}
+              </div>
+              {isAdmin && (
+                <div className="flex flex-col gap-2 mb-3 text-[11px]">
+                  <div className="flex items-center gap-2">
+                    <label className="text-neutral-400">Ver:</label>
+                    <select value={viewGroup} onChange={e=>setViewGroup(e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1 flex-1">
+                      <option value="__ALL__">Todos los grupos</option>
+                      {allGroups.map(g=> <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-neutral-400">Enviar a:</label>
+                    <select value={sendGroup} onChange={e=>setSendGroup(e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1 flex-1">
+                      <option value="">(Seleccionar)</option>
+                      {allGroups.map(g=> <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-start gap-2 mb-4">
+                <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={isAdmin? 'Nota para el grupo seleccionado' : 'Escribe una nota'} className="flex-1 bg-neutral-800 rounded-xl p-2 text-sm h-16 resize-none" />
+                <button onClick={send} className="h-16 px-4 rounded-xl bg-[#e7922b] text-[#1a2430] text-sm font-semibold disabled:opacity-40" disabled={!text.trim() || (isAdmin && !sendGroup)}>Enviar</button>
+              </div>
+              {!msgs.length && <div className="text-xs text-neutral-500">Sin mensajes.</div>}
+              <ul className="space-y-3 overflow-auto pr-1 flex-1">
+                {msgs.map(m=>{
+                  const isMine = m.authorId===session.id;
+                  const read = m.readBy.includes(session.id);
+                  return (
+                    <li key={m.id} className="p-3 rounded-xl border border-neutral-700/60 bg-neutral-900/40 text-sm group">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="text-xs text-neutral-400 mb-1 flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-neutral-300">{isMine? 'Yo' : (m.authorNombre||'Alguien')}</span>
+                            {isAdmin && <span className="text-[9px] px-1 py-0.5 rounded bg-neutral-700/60 border border-neutral-600/40">{m.grupo}</span>}
+                            <span className="text-[10px] whitespace-nowrap">{new Date(m.createdAt).toLocaleString()}</span>
+                            {read && !isMine && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-600/20 text-green-400 border border-green-600/40">Leído</span>}
+                          </div>
+                          <div className="whitespace-pre-wrap leading-snug break-words">{m.text}</div>
+                        </div>
+                        <div className="flex flex-col gap-1 shrink-0 items-end">
+                          {!isMine && !read && (
+                            <button onClick={()=>markRead(m.id)} className="px-2 py-1 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-[10px]">Leído</button>
+                          )}
+                          {(isMine || read) && (
+                            <div className="relative">
+                              {confirmDeleteId!==m.id && (
+                                <button onClick={()=>setConfirmDeleteId(m.id)} className="px-2 py-1 rounded-lg bg-red-700 hover:bg-red-600 text-[10px]">Eliminar</button>
+                              )}
+                              {confirmDeleteId===m.id && (
+                                <div className="absolute top-0 right-0 mt-6 w-40 z-50 p-2 rounded-lg bg-neutral-800 border border-neutral-600 shadow-lg animate-fade-in text-[10px]">
+                                  <div className="mb-2 leading-snug">¿Eliminar mensaje?</div>
+                                  <div className="flex gap-2 justify-end">
+                                    <button onClick={()=>setConfirmDeleteId(null)} className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600">No</button>
+                                    <button onClick={()=>remove(m.id)} className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 font-semibold">Sí</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function ChartVentas({ period, sales, products=[] }) {
+  // Tick personalizado para semana: muestra fecha y debajo el día (LUNES...)
+  const WeekTick = (props)=>{
+    const { x, y, payload } = props;
+    const dateStr = payload?.value || '';
+    let dayName = '';
+    if(/\d{4}-\d{2}-\d{2}/.test(dateStr)){
+      const d = new Date(dateStr+"T00:00:00");
+      const dias = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
+      dayName = dias[d.getDay()] || '';
+    }
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text dy={10} textAnchor="middle" fill="#f09929" fontSize={15}>{dateStr}</text>
+        <text dy={25} textAnchor="middle" fill="#f09929" fontSize={15}>{dayName}</text>
+      </g>
+    );
+  };
+  // Agrupar por periodo: usamos NETO (total - gasto delivery) y excluimos cancelaciones sintéticas
   const data = useMemo(()=>{
     if(!sales.length) return [];
     const today = new Date();
     function fmt(d){ return d.toISOString().slice(0,10); }
+
+    function netoVenta(s){
+      if(s.sinteticaCancelada) return 0; // no graficar pérdidas por cancelación
+      // bruto preferente: campo total si existe; si no, reconstruir con precios catálogo
+      let bruto;
+      if(typeof s.total === 'number') bruto = Number(s.total||0);
+      else {
+        const p1 = products.find(p=>p.sku===s.sku);
+        const p2 = s.skuExtra ? products.find(p=>p.sku===s.skuExtra):null;
+        bruto = (Number(p1?.precio ?? s.precio ?? 0) * Number(s.cantidad||0)) + (s.skuExtra ? Number(p2?.precio||0) * Number(s.cantidadExtra||0) : 0);
+      }
+      const gasto = Number(s.gasto||0);
+      return bruto - gasto; // neto después de delivery
+    }
+
     if(period==='week'){
       const days = [...Array(7)].map((_,i)=>{
         const d = new Date(today);
@@ -2446,7 +3044,7 @@ function ChartVentas({ period, sales }) {
         return fmt(d);
       });
       const map = Object.fromEntries(days.map(d=>[d,0]));
-      sales.forEach(s=>{ if(map[s.fecha] != null) map[s.fecha] += s.precio * s.cantidad; });
+      sales.forEach(s=>{ if(map[s.fecha] != null) map[s.fecha] += netoVenta(s); });
       return days.map(d=>({ label:d, total: map[d] }));
     }
     if(period==='month'){
@@ -2458,31 +3056,48 @@ function ChartVentas({ period, sales }) {
         const d = new Date(year, month, day);
         map[fmt(d)] = 0;
       }
-      sales.forEach(s=>{ if(map[s.fecha] != null) map[s.fecha] += s.precio * s.cantidad; });
+      sales.forEach(s=>{ if(map[s.fecha] != null) map[s.fecha] += netoVenta(s); });
       return Object.keys(map).map(k=>({ label: k.slice(8,10), total: map[k] }));
     }
-    // quarter (últimos 3 meses incluyendo el actual)
-    const months = [];
-    for(let i=2;i>=0;i--){
-      const d = new Date(today.getFullYear(), today.getMonth()-i, 1);
-      months.push({ y:d.getFullYear(), m:d.getMonth() });
+    // quarter: ahora mostrar últimas 12 semanas (cada barra = semana, etiqueta = inicio de semana)
+    const weeks = [];
+    for(let i=11;i>=0;i--){
+      const end = new Date(today);
+      end.setDate(end.getDate() - (i*7)); // fin semana incluido
+      const start = new Date(end);
+      start.setDate(start.getDate()-6); // 7 días
+      weeks.push({ startISO: fmt(start), endISO: fmt(end), total:0 });
     }
-    const map = months.map(m=>({ key: m.y+'-'+String(m.m+1).padStart(2,'0'), total:0 }));
     sales.forEach(s=>{
-      const seg = s.fecha.slice(0,7);
-      const bucket = map.find(b=>b.key===seg);
-      if(bucket) bucket.total += s.precio * s.cantidad;
+      for(const w of weeks){
+        if(s.fecha >= w.startISO && s.fecha <= w.endISO){
+          w.total += netoVenta(s);
+          break;
+        }
+      }
     });
-    return map.map(b=>({ label: b.key, total: b.total }));
-  }, [period, sales]);
+    return weeks.map(w=>({ label: w.startISO.slice(5), total: w.total }));
+  }, [period, sales, products]);
 
+  // Escalado personalizado para semana y mes: incrementos de 250
+  let yAxisProps = { stroke:'#f09929', tickLine:false, axisLine:false };
+  if(['week','month'].includes(period) && data.length){
+    const maxVal = Math.max(...data.map(d=>d.total||0));
+    const step = 250;
+    const upper = Math.max(step, Math.ceil(maxVal/step)*step);
+    const ticks = [];
+    for(let v=0; v<=upper; v+=step) ticks.push(v);
+    yAxisProps = { ...yAxisProps, domain:[0, upper], ticks, tickFormatter:(v)=>v };
+  }
   return (
     <div className="w-full h-64">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f09929" opacity={0.35} />
-          <XAxis dataKey="label" stroke="#f09929" tickLine={false} axisLine={false} />
-          <YAxis stroke="#f09929" tickLine={false} axisLine={false} />
+          <XAxis dataKey="label" stroke="#f09929" tickLine={false} axisLine={false}
+            tick={period==='week'? <WeekTick /> : undefined}
+          />
+          <YAxis {...yAxisProps} />
           <Tooltip formatter={(v) => currency(v)} contentStyle={{ background:'#0f171e', border:'1px solid #f09929', fontSize:12 }} cursor={{ fill:'#f0992930' }} />
           <Bar dataKey="total" fill="#f09929" radius={[6,6,0,0]} />
         </BarChart>
@@ -2530,15 +3145,9 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   const [cantidad, setCantidad] = useState(1);
   const [precioTotal, setPrecioTotal] = useState(0); // ahora representa TOTAL
   const [hIni, setHIni] = useState('');
-  const [rsHIni, setRsHIni] = useState('');
   const [mIni, setMIni] = useState('00');
-  const [rsMIni, setRsMIni] = useState('00');
   const [ampmIni, setAmpmIni] = useState('AM');
-  const [hFin, setHFin] = useState('');
-  const [rsHFin, setRsHFin] = useState('');
-  const [mFin, setMFin] = useState('00');
-  const [rsMFin, setRsMFin] = useState('00');
-  const [ampmFin, setAmpmFin] = useState('PM');
+  // Eliminados estados de hora fin y duplicados para reprogramación.
   const [skuExtra, setSkuExtra] = useState('');
   const [cantidadExtra, setCantidadExtra] = useState(0);
   // Métodos disponibles restringidos a Delivery y Encomienda. Iniciar en Delivery.
@@ -2547,6 +3156,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   const [celular, setCelular] = useState("");
   // Notas removidas según requerimiento
   const [destinoEncomienda, setDestinoEncomienda] = useState("");
+  const [motivo, setMotivo] = useState(""); // motivo para productos sintéticos
 
   // Forzar que cada vez que se abre el formulario la fecha arranque en el día actual
   useEffect(()=>{ setFecha(todayISO()); },[]);
@@ -2561,14 +3171,18 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   function submit(e) {
     e.preventDefault();
     if(!sku) return alert('Producto inválido');
-    if(!cantidad || cantidad <=0) return alert('Cantidad inválida');
-    if(skuExtra && cantidadExtra <=0) return alert('Cantidad adicional inválida');
-    function build12(h,m,ap){ if(!h) return ''; return `${h}:${m} ${ap}`; }
-    const inicioStr = build12(hIni,mIni,ampmIni);
-    const finStr = build12(hFin,mFin,ampmFin);
-    const horaEntrega = inicioStr && finStr ? `${inicioStr}-${finStr}` : inicioStr;
+    const prodActual = products.find(p=>p.sku===sku);
+    const esSintetico = !!prodActual?.sintetico;
+    if(esSintetico){
+      if(!motivo.trim()) return alert('Ingresa un motivo');
+    } else {
+      if(!cantidad || cantidad <=0) return alert('Cantidad inválida');
+      if(skuExtra && cantidadExtra <=0) return alert('Cantidad adicional inválida');
+    }
+  function build12(h,m,ap){ if(!h) return ''; return `${h}:${m} ${ap}`; }
+  const horaEntrega = build12(hIni,mIni,ampmIni); // sin hora fin
   if(metodo==='Encomienda' && !destinoEncomienda.trim()) return alert('Ingresa destino de la encomienda');
-  onSubmit({ fecha, ciudad: ciudadVenta, sku, cantidad: Number(cantidad), skuExtra: skuExtra || undefined, cantidadExtra: skuExtra ? Number(cantidadExtra) : undefined, total: Number(precioTotal||0), horaEntrega, vendedora: session.nombre, vendedoraId: session.id, metodo, celular, destinoEncomienda: metodo==='Encomienda'? destinoEncomienda.trim(): undefined, comprobante: comprobanteFile || undefined });
+  onSubmit({ fecha, ciudad: ciudadVenta, sku, cantidad: esSintetico?1:Number(cantidad), skuExtra: esSintetico? undefined : (skuExtra || undefined), cantidadExtra: esSintetico? undefined : (skuExtra ? Number(cantidadExtra) : undefined), total: esSintetico?0:Number(precioTotal||0), horaEntrega, vendedora: session.nombre, vendedoraId: session.id, metodo: esSintetico? undefined : metodo, celular: esSintetico? undefined : celular, destinoEncomienda: (!esSintetico && metodo==='Encomienda')? destinoEncomienda.trim(): undefined, comprobante: esSintetico? undefined : (comprobanteFile || undefined), motivo: esSintetico? motivo.trim(): undefined });
   }
 
   return (
@@ -2595,22 +3209,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
             </select>
           </div>
         </div>
-        <div>
-          <label className="text-sm">Hora fin (opcional)</label>
-          <div className="flex gap-2 mt-1">
-            <select value={hFin} onChange={e=>setHFin(e.target.value)} className="bg-neutral-800 rounded-xl px-2 py-2 text-sm w-16">
-              <option value="">--</option>
-              {Array.from({length:12},(_,i)=>i+1).map(h=> <option key={h}>{h}</option>)}
-            </select>
-            <select value={mFin} onChange={e=>setMFin(e.target.value)} className="bg-neutral-800 rounded-xl px-2 py-2 text-sm w-18">
-              {['00','15','30','45'].map(m=> <option key={m}>{m}</option>)}
-            </select>
-            <select value={ampmFin} onChange={e=>setAmpmFin(e.target.value)} className="bg-neutral-800 rounded-xl px-2 py-2 text-sm">
-              <option>AM</option>
-              <option>PM</option>
-            </select>
-          </div>
-        </div>
+  {/* Hora fin removida */}
         {!fixedCity && (
           <div>
             <label className="text-sm">Ciudad</label>
@@ -2619,56 +3218,70 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
             </select>
           </div>
         )}
-        <div className="col-span-2 text-xs text-neutral-500 -mt-2">Producto principal ya fue elegido al iniciar. ({(visibleProducts.find(p=>p.sku===sku)?.nombre)||'—'})</div>
-        <div>
-          <label className="text-sm">Cantidad</label>
-          <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-        </div>
-        <div>
-          <label className="text-sm">Precio TOTAL</label>
-          <input type="number" step="0.01" value={precioTotal} onChange={(e) => setPrecioTotal(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-        </div>
-        <div>
-          <label className="text-sm">Producto adicional (opcional)</label>
-          <select value={skuExtra} onChange={e=>setSkuExtra(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
-            <option value="">— Ninguno —</option>
-            {products.filter(p=>p.sku!==sku).map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
-          </select>
-          <div className="text-[10px] text-neutral-500 mt-1">Lista completa (aunque no esté habilitado).</div>
-        </div>
-        <div>
-          <label className="text-sm">Cantidad adicional</label>
-          <input type="number" min={0} value={cantidadExtra} onChange={e=>setCantidadExtra(e.target.value)} disabled={!skuExtra} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-50" />
-        </div>
-        <div>
-          <label className="text-sm">Método de pago</label>
-          <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
-            <option value="Delivery">Delivery</option>
-            <option value="Encomienda">Encomienda</option>
-          </select>
-          {metodo==='Encomienda' && (
-            <div className="mt-2">
-              <label className="block text-[11px] text-neutral-400 mb-1">Destino Encomienda</label>
-              <input value={destinoEncomienda} onChange={e=>setDestinoEncomienda(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 text-sm" placeholder="Ciudad / Agencia / Referencia" />
-            </div>
-          )}
-          {/* Input de comprobante siempre visible (opcional) */}
-          <div className="mt-2 text-xs space-y-1">
-            <input type="file" accept="image/*,.pdf" onChange={async e=>{
-              const f = e.target.files?.[0]; if(!f) { setComprobanteFile(null); return; }
-              if(f.size > 2*1024*1024){ alert('Archivo supera 2MB'); return; }
-              const reader = new FileReader();
-              reader.onload = ev=> setComprobanteFile(ev.target?.result || null);
-              reader.readAsDataURL(f);
-            }} className="text-xs" />
-            <div className="text-[10px] text-neutral-500">Comprobante (máx 2MB) — opcional.</div>
-            {comprobanteFile && <div className="text-[10px] text-green-400">Comprobante adjuntado</div>}
-          </div>
-        </div>
-        <div>
-          <label className="text-sm">Celular</label>
-          <input value={celular} onChange={(e) => setCelular(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Número" />
-        </div>
+        {(() => { const prodActual = products.find(p=>p.sku===sku); const esSintetico = !!prodActual?.sintetico; return (
+          <>
+            <div className="col-span-2 text-xs text-neutral-500 -mt-2">Producto principal ya fue elegido al iniciar. ({prodActual?.nombre||'—'}) {esSintetico && <span className="text-[#f09929] font-semibold">(Sintético)</span>}</div>
+            {esSintetico && (
+              <div className="col-span-2">
+                <label className="text-sm">Motivo</label>
+                <textarea value={motivo} onChange={e=>setMotivo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 text-sm" placeholder="Describe el motivo" rows={2} />
+                <div className="text-[10px] text-neutral-500 mt-1">Requerido para productos sintéticos.</div>
+              </div>
+            )}
+            {!esSintetico && (
+              <>
+                <div>
+                  <label className="text-sm">Cantidad</label>
+                  <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+                </div>
+                <div>
+                  <label className="text-sm">Precio TOTAL</label>
+                  <input type="number" step="0.01" value={precioTotal} onChange={(e) => setPrecioTotal(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+                </div>
+                <div>
+                  <label className="text-sm">Producto adicional (opcional)</label>
+                  <select value={skuExtra} onChange={e=>setSkuExtra(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
+                    <option value="">— Ninguno —</option>
+                    {products.filter(p=>p.sku!==sku).map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+                  </select>
+                  <div className="text-[10px] text-neutral-500 mt-1">Lista completa (aunque no esté habilitado).</div>
+                </div>
+                <div>
+                  <label className="text-sm">Cantidad adicional</label>
+                  <input type="number" min={0} value={cantidadExtra} onChange={e=>setCantidadExtra(e.target.value)} disabled={!skuExtra} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-50" />
+                </div>
+                <div>
+                  <label className="text-sm">Método de pago</label>
+                  <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
+                    <option value="Delivery">Delivery</option>
+                    <option value="Encomienda">Encomienda</option>
+                  </select>
+                  {metodo==='Encomienda' && (
+                    <div className="mt-2">
+                      <label className="block text-[11px] text-neutral-400 mb-1">Destino Encomienda</label>
+                      <input value={destinoEncomienda} onChange={e=>setDestinoEncomienda(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 text-sm" placeholder="Ciudad / Agencia / Referencia" />
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs space-y-1">
+                    <input type="file" accept="image/*,.pdf" onChange={async e=>{
+                      const f = e.target.files?.[0]; if(!f) { setComprobanteFile(null); return; }
+                      if(f.size > 2*1024*1024){ alert('Archivo supera 2MB'); return; }
+                      const reader = new FileReader();
+                      reader.onload = ev=> setComprobanteFile(ev.target?.result || null);
+                      reader.readAsDataURL(f);
+                    }} className="text-xs" />
+                    <div className="text-[10px] text-neutral-500">Comprobante (máx 2MB) — opcional.</div>
+                    {comprobanteFile && <div className="text-[10px] text-green-400">Comprobante adjuntado</div>}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm">Celular</label>
+                  <input value={celular} onChange={(e) => setCelular(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Número" />
+                </div>
+              </>
+            )}
+          </>
+        ); })()}
   {/* Campo Notas removido */}
       </div>
       <div className="flex justify-end">
@@ -2700,11 +3313,13 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
   function addSale(payload){
     const product = products.find(p=>p.sku===payload.sku);
     if(!product) return alert('Producto no encontrado');
-    if(product.stock < payload.cantidad) return alert('Stock central insuficiente (no se puede reservar)');
+    const esSintetico = !!product.sintetico;
+    if(esSintetico && payload.cantidad !== 1){ payload.cantidad = 1; }
+    if(!esSintetico && product.stock < payload.cantidad) return alert('Stock central insuficiente (no se puede reservar)');
     if(payload.skuExtra && payload.cantidadExtra){
       const prod2 = products.find(p=>p.sku===payload.skuExtra);
       if(!prod2) return alert('Producto adicional no encontrado');
-      if(prod2.stock < payload.cantidadExtra) return alert('Stock central insuficiente del adicional');
+      if(!prod2.sintetico && prod2.stock < payload.cantidadExtra) return alert('Stock central insuficiente del adicional');
     }
     const nextSale = { id: uid(), ...payload, estadoEntrega: 'pendiente' };
     setSales([nextSale, ...sales]);
@@ -2752,8 +3367,9 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
             });
             const stockBase = enviadosConfirmados - ventasConfirmadas; // disponible sin contar pendientes
             const disponible = stockBase - ventasPendientes; // lo que queda si todos los pendientes se confirman
+            const esSintetico = !!p.sintetico;
             return (
-              <button key={p.sku} onClick={()=>openSale(p)} className="group rounded-3xl p-3 transition flex flex-col gap-3 bg-[#0f171e] hover:ring-2 hover:ring-neutral-600/40 w-[270px] mx-auto">
+              <button key={p.sku} onClick={()=>openSale(p)} className="group rounded-3xl p-3 transition flex flex-col gap-3 bg-[#0f171e] hover:ring-2 hover:ring-neutral-600/40 w-full max-w-[280px] mx-auto">
                 <div className="text-[15px] font-semibold tracking-wide text-center uppercase leading-snug line-clamp-2 px-1" title={p.nombre}>{p.nombre}</div>
                 <div className="relative w-full rounded-2xl bg-neutral-800 overflow-hidden border border-neutral-700 shadow-inner">
                   <div className="w-full pb-[100%]"></div>
@@ -2762,9 +3378,13 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
                   ) : (
                     <span className="absolute inset-0 flex items-center justify-center text-[11px] text-neutral-500">SIN IMAGEN</span>
                   )}
-                  <div className="absolute top-2 left-2 bg-black/60 px-3 py-1 rounded-lg text-[20px] font-semibold text-[#f09929] leading-none" title={`Stock base: ${stockBase}\nPendientes: ${ventasPendientes}`}>{disponible}</div>
+                  {!esSintetico && (
+                    <div className="absolute top-2 left-2 bg-black/60 px-3 py-1 rounded-lg text-[20px] font-semibold text-[#f09929] leading-none" title={`Stock base: ${stockBase}\nPendientes: ${ventasPendientes}`}>{disponible}</div>
+                  )}
                 </div>
-                <div className="text-[15px] font-semibold text-[#f09929] tracking-wide text-center">STOCK: {disponible}</div>
+                {!esSintetico && (
+                  <div className="text-[15px] font-semibold text-[#f09929] tracking-wide text-center">STOCK: {disponible}</div>
+                )}
               </button>
             );
           })}
@@ -2783,7 +3403,7 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
 }
 
 // ---------------------- Ventas (listado dedicado) ----------------------
-function VentasView({ sales, products, session, dispatches, setDispatches }) {
+function VentasView({ sales, setSales, products, session, dispatches, setDispatches, setProducts, setView, setDepositSnapshots }) {
   const cities = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ"]; // removido 'SIN CIUDAD'
   const [cityFilter, setCityFilter] = useState(()=>{
     try {
@@ -2831,8 +3451,8 @@ function VentasView({ sales, products, session, dispatches, setDispatches }) {
         {cityFilter && (
           <>
             <CityPendingShipments city={cityFilter} dispatches={dispatches} setDispatches={setDispatches} products={products} session={session} />
-            <CityStock city={cityFilter} products={products} sales={sales} dispatches={dispatches.filter(d=>d.status==='confirmado')} />
-            <CitySummary city={cityFilter} sales={sales} products={products} />
+            <CityStock city={cityFilter} products={products} sales={sales} dispatches={dispatches.filter(d=>d.status==='confirmado')} setSales={setSales} session={session} />
+            <CitySummary city={cityFilter} sales={sales} setSales={setSales} products={products} session={session} setProducts={setProducts} setView={setView} setDepositSnapshots={setDepositSnapshots} />
           </>
         )}
   {/* Tabla de ventas removida a solicitud. */}
@@ -2842,19 +3462,39 @@ function VentasView({ sales, products, session, dispatches, setDispatches }) {
 }
 
 // Resumen tipo cuadro para una ciudad seleccionada
-function CitySummary({ city, sales, products }) {
-  const filtradas = sales
-    .filter(s=>s.ciudad===city && (s.estadoEntrega||'confirmado')==='confirmado')
+function CitySummary({ city, sales, setSales, products, session, setProducts, setView, setDepositSnapshots }) {
+  // Ventas confirmadas normales
+  const confirmadas = sales
+    .filter(s=>s.ciudad===city && (s.estadoEntrega||'confirmado')==='confirmado' && !s.settledAt)
     .sort((a,b)=>{
-      // Orden descendente: más reciente primero
-      const ta = b.confirmadoAt || 0;
-      const tb = a.confirmadoAt || 0;
-      if(ta!==tb) return ta - tb;
-      if(b.fecha!==a.fecha) return b.fecha.localeCompare(a.fecha);
-      const ha = (b.horaEntrega||'').split('-')[0].trim();
-      const hb = (a.horaEntrega||'').split('-')[0].trim();
-      return minutesFrom12(normalizeRangeTo12(ha)) - minutesFrom12(normalizeRangeTo12(hb));
+      const ta = a.confirmadoAt || a.canceladoAt || 0;
+      const tb = b.confirmadoAt || b.canceladoAt || 0;
+      // más reciente primero
+      if(tb !== ta) return tb - ta;
+      if(a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+      return (b.id||'').localeCompare(a.id||'');
     });
+
+  // Pedidos cancelados con costo de delivery: deben aparecer para reflejar gasto.
+  const canceladasConCosto = sales
+    .filter(s=> s.ciudad===city && s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0) > 0 && !s.settledAt)
+    .map(s=> ({
+      ...s,
+      sinteticaCancelada: true,
+      gasto: 0,
+      total: 0,
+      confirmadoAt: s.confirmadoAt || s.canceladoAt || Date.parse(s.fecha+'T00:00:00') || 0,
+    }));
+
+  // Unificar y ordenar por fecha y hora (más reciente primero). Si hay horaEntrega, se usa para desempatar.
+  const unificados = [...confirmadas, ...canceladasConCosto];
+  const filtradas = unificados.slice().sort((a,b)=> {
+    const ta = a.confirmadoAt || a.canceladoAt || 0;
+    const tb = b.confirmadoAt || b.canceladoAt || 0;
+    if(tb !== ta) return tb - ta;
+    if(a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+    return (b.id||'').localeCompare(a.id||'');
+  });
 
   // Construir filas (rows) que antes se usaban pero no estaban definidas -> causaba ReferenceError
   const rows = filtradas.map(s=> {
@@ -2863,6 +3503,8 @@ function CitySummary({ city, sales, products }) {
     const totalCalc = Number(s.total != null ? s.total : (Number(s.precio||0)*Number(s.cantidad||0) +
       (s.skuExtra ? (products.find(p=>p.sku===s.skuExtra)?.precio||0)*Number(s.cantidadExtra||0) : 0)));
     const gasto = Number(s.gasto||0);
+    const gastoCancel = Number(s.gastoCancelacion||0);
+    const esCanceladaSint = !!s.sinteticaCancelada;
     return {
       id: s.id,
       sku: s.sku,
@@ -2873,22 +3515,31 @@ function CitySummary({ city, sales, products }) {
       hora: s.horaEntrega || '',
       ciudad: s.ciudad,
       vendedor: s.vendedora,
-      productos: [p1?.nombre || s.sku, p2 ? p2.nombre : null].filter(Boolean).join(' + '),
-      cantidades: [s.cantidad, s.cantidadExtra].filter(x => x != null).join(' + '),
-      total: totalCalc,
-      gasto,
-      neto: totalCalc - gasto,
+      productos: esCanceladaSint ? '— (Cancelada)' : [p1?.nombre || s.sku, p2 ? p2.nombre : null].filter(Boolean).join(' + '),
+      cantidades: esCanceladaSint ? '' : [s.cantidad, s.cantidadExtra].filter(x => x != null).join(' + '),
+      total: esCanceladaSint ? 0 : totalCalc,
+      gasto: esCanceladaSint ? 0 : gasto,
+      neto: esCanceladaSint ? -gastoCancel : (totalCalc - gasto), // neto negativo como pérdida por cancelación
+      gastoCancelacion: gastoCancel,
+      sinteticaCancelada: esCanceladaSint,
       metodo: s.metodo,
       celular: s.celular || '',
       comprobante: s.comprobante,
-      destinoEncomienda: s.destinoEncomienda
+  destinoEncomienda: s.destinoEncomienda,
+  motivo: s.motivo
     };
   });
 
   // (Variables previas que ya no se usan eliminadas)
-  const productOrder = products.map(p=>p.sku);
+  // Excluir productos sintéticos de las columnas (vista por ciudad)
+  const productOrder = products.filter(p=>!p.sintetico).map(p=>p.sku);
   const [openComp, setOpenComp] = useState(null); // base64 comprobante
+  const [editingSale, setEditingSale] = useState(null);
+  const [confirmDeleteSale, setConfirmDeleteSale] = useState(false);
+  const [editForm, setEditForm] = useState({});
   const [showResumen, setShowResumen] = useState(false);
+  const [cobrarOpen, setCobrarOpen] = useState(false); // modal cobrar
+  // eliminado estado 'cobrando' (flujo ahora sin espera)
   const hoyISO = todayISO();
   const hoyDMY = hoyISO ? (hoyISO.slice(8,10)+'/'+hoyISO.slice(5,7)+'/'+hoyISO.slice(0,4)) : '';
   useEffect(()=>{
@@ -2897,6 +3548,61 @@ function CitySummary({ city, sales, products }) {
     window.addEventListener('keydown', onKey);
     return ()=> window.removeEventListener('keydown', onKey);
   }, [showResumen]);
+  const isAdmin = session?.rol==='admin';
+
+  function beginEdit(id){
+    const sale = filtradas.find(s=>s.id===id);
+    if(!sale) return;
+    setEditingSale(sale);
+    setEditForm({
+      fecha: sale.fecha || '',
+      horaEntrega: sale.horaEntrega || sale.hora || '',
+      ciudad: sale.ciudad || '',
+      metodo: sale.metodo || 'Delivery',
+      destinoEncomienda: sale.destinoEncomienda || '',
+      vendedora: sale.vendedora || sale.vendedor || '',
+      celular: sale.celular || '',
+      sku: sale.sku || '',
+      cantidad: sale.cantidad || 0,
+      skuExtra: sale.skuExtra || '',
+      cantidadExtra: sale.cantidadExtra || 0,
+      total: sale.total != null ? sale.total : 0,
+      gasto: sale.gasto != null ? sale.gasto : 0,
+    });
+  }
+
+  function updateEditField(field, value){ setEditForm(f=> ({...f, [field]: value})); }
+
+  function saveEditSale(){
+    if(!editingSale) return;
+    setSales(prev => prev.map(s=> s.id===editingSale.id ? {
+      ...s,
+      fecha: editForm.fecha,
+      horaEntrega: editForm.horaEntrega,
+      ciudad: editForm.ciudad,
+      metodo: editForm.metodo,
+      destinoEncomienda: editForm.metodo==='Encomienda' ? editForm.destinoEncomienda : '',
+      vendedora: editForm.vendedora,
+      celular: editForm.celular,
+      sku: editForm.sku,
+      cantidad: Number(editForm.cantidad)||0,
+      skuExtra: editForm.skuExtra || '',
+      cantidadExtra: Number(editForm.cantidadExtra)||0,
+      total: Number(editForm.total)||0,
+      gasto: Number(editForm.gasto)||0,
+      neto: (Number(editForm.total)||0) - (Number(editForm.gasto)||0)
+    } : s));
+    setEditingSale(null);
+  }
+
+  function deleteEditingSale(){
+    if(!editingSale) return;
+    // Eliminación definitiva
+    setSales(prev => prev.filter(s=> s.id!==editingSale.id));
+    setConfirmDeleteSale(false);
+    setEditingSale(null);
+  }
+
   return (
     <div className="rounded-2xl p-4 bg-[#0f171e]">
       <div className="flex items-center justify-between mb-4">
@@ -2912,8 +3618,9 @@ function CitySummary({ city, sales, products }) {
           </div>
         </div>
       </div>
-      <div className="overflow-auto">
-        <table className="w-full text-[11px] min-w-[960px]">
+      <div className="overflow-auto -mx-3 md:mx-0 pb-2">
+        <div className="md:hidden text-[10px] text-neutral-500 px-3 pb-1">Desliza horizontalmente para ver la tabla →</div>
+        <table className="w-full text-[11px] min-w-[1000px]">
           <thead className="bg-neutral-800/60">
             <tr>
               <th className="p-2 text-left">Fecha</th>
@@ -2929,65 +3636,186 @@ function CitySummary({ city, sales, products }) {
               <th className="p-2 text-right">Total</th>
               <th className="p-2 text-center">Celular</th>
               <th className="p-2 text-center">Comprobante</th>
+              {isAdmin && <th className="p-2 text-center">Editar</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map(r=>{
-              const cantidades = productOrder.map(sku=>{ let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
+              // Si es fila cancelada sintética, no debe descontar productos: cantidades en cero
+              const cantidades = productOrder.map(sku=>{
+                if(r.sinteticaCancelada) return 0;
+                let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
               return (
                 <tr key={r.id} className="border-t border-neutral-800">
                   <td className="p-2">{toDMY(r.fecha)}</td>
                   <td className="p-2">{r.hora}</td>
                   <td className="p-2">{r.ciudad}</td>
-                  <td className="p-2 text-left max-w-[160px]">{r.metodo==='Encomienda' ? <span className="text-[14px]" title={r.destinoEncomienda||''}>{r.destinoEncomienda||''}</span>: null}</td>
+                  <td className="p-2 text-left max-w-[160px]">{r.metodo==='Encomienda' ? <span className="text-[14px]" title={r.destinoEncomienda||''}>{r.destinoEncomienda||''}</span>: (r.motivo? <span className="text-[12px] text-[#e7922b]" title={r.motivo}>{r.motivo}</span> : null)}</td>
                   <td className="p-2 whitespace-nowrap">{firstName(r.vendedor)}</td>
                   {cantidades.map((c,i)=> <td key={i} className="p-2 text-center">{c||''}</td>)}
-      <td className="p-2 text-right font-semibold">{currency(r.total)}</td>
-      <td className="p-2 text-right">{r.gasto?currency(r.gasto):''}</td>
-      <td className="p-2 text-right font-semibold">{currency(r.neto)}</td>
+  <td className="p-2 text-right font-semibold">{currency(r.total)}</td>
+  <td className={"p-2 text-right "+(r.sinteticaCancelada? 'text-red-400':'')}>{r.gasto?currency(r.gasto):''}</td>
+  <td className={"p-2 text-right font-semibold "+(r.sinteticaCancelada? 'text-red-400':'')}>{currency(r.neto)}</td>
                   <td className="p-2 text-center">{r.celular||''}</td>
                   <td className="p-2 text-center">
-                    {r.comprobante && (
-                      <button
-                        onClick={()=>setOpenComp(r.comprobante)}
-                        title="Ver comprobante"
-                        className="p-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-                        </svg>
-                      </button>
+                    {r.sinteticaCancelada && Number(r.gastoCancelacion||0) > 0 ? (
+                      <span className="text-[11px] font-semibold text-red-400">Cancelado</span>
+                    ) : (
+                      r.comprobante && (
+                        <button
+                          onClick={()=>setOpenComp(r.comprobante)}
+                          title="Ver comprobante"
+                          className="p-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                          </svg>
+                        </button>
+                      )
                     )}
                   </td>
+                  {isAdmin && (
+                    <td className="p-2 text-center">
+                      <button onClick={()=>beginEdit(r.id)} className="px-2 py-1 rounded-lg bg-[#1d2a34] hover:bg-[#253341] text-[10px] border border-[#e7922b]/40">Editar</button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
-    {!rows.length && <tr><td colSpan={5+productOrder.length+5} className="p-6 text-center text-neutral-500 text-sm">Sin ventas confirmadas.</td></tr>}
+  {!rows.length && <tr><td colSpan={5+productOrder.length+5} className="p-6 text-center text-neutral-500 text-sm">Sin ventas confirmadas.</td></tr>}
           </tbody>
           {rows.length>0 && (()=>{
             const totSku = {};
             rows.forEach(r=>{
+              if(r.sinteticaCancelada) return; // no afectar stock ni totales de producto
               if(r.sku) totSku[r.sku] = (totSku[r.sku]||0) + Number(r.cantidad||0);
               if(r.skuExtra) totSku[r.skuExtra] = (totSku[r.skuExtra]||0) + Number(r.cantidadExtra||0);
             });
             const sumMonto = rows.reduce((a,r)=> a + Number(r.total||0), 0);
-            const sumDelivery = rows.reduce((a,r)=> a + Number(r.gasto||0), 0);
-            const sumTotal = rows.reduce((a,r)=> a + Number(r.neto||0), 0);
+    const sumDelivery = rows.reduce((a,r)=> a + Number(r.gasto||0), 0);
+    const sumTotal = rows.reduce((a,r)=> a + Number(r.neto||0), 0);
             return (
               <tfoot>
                 <tr className="border-t border-neutral-800 bg-neutral-900/40">
                   <td className="p-2 text-[10px] font-semibold text-neutral-400" colSpan={5}>Totales</td>
                   {productOrder.map(sku=> <td key={sku} className="p-2 text-center font-semibold text-[#e7922b]">{totSku[sku]||''}</td>)}
                   <td className="p-2 text-right font-bold text-[#e7922b]">{currency(sumMonto)}</td>
-                  <td className="p-2 text-right font-bold text-[#e7922b]">{sumDelivery?currency(sumDelivery):''}</td>
+      <td className="p-2 text-right font-bold text-[#e7922b]">{sumDelivery?currency(sumDelivery):''}</td>
                   <td className="p-2 text-right font-bold text-[#e7922b]">{currency(sumTotal)}</td>
                   <td className="p-2"></td>
                   <td className="p-2"></td>
+      {isAdmin && <td className="p-2"></td>}
                 </tr>
               </tfoot>
             );
           })()}
         </table>
+        {rows.length>0 && session.rol==='admin' && (
+          <div className="mt-4 flex justify-end">
+            <button onClick={()=>setCobrarOpen(true)} className="px-6 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-sm font-semibold shadow hover:brightness-110 active:scale-[0.98]">Limpiar</button>
+          </div>
+        )}
+        {cobrarOpen && (
+          <Modal onClose={()=>{ setCobrarOpen(false); }} autoWidth>
+            {(()=>{
+              // Construir resumen de ventas confirmadas actuales (excluye filas sintéticas canceladas y productos sintéticos)
+              const resumenSku = {};
+              rows.forEach(r=>{
+                if(r.sinteticaCancelada) return;
+                if(r.sku) resumenSku[r.sku] = (resumenSku[r.sku]||0) + Number(r.cantidad||0);
+                if(r.skuExtra) resumenSku[r.skuExtra] = (resumenSku[r.skuExtra]||0) + Number(r.cantidadExtra||0);
+              });
+              const entries = Object.entries(resumenSku);
+              // Conteo de confirmadas separando sintéticas
+              const ventasSinteticas = rows.filter(r=>{
+                if(r.sinteticaCancelada) return false;
+                const prod = products.find(p=>p.sku===r.sku);
+                return prod?.sintetico;
+              }).length;
+              const ventasConfirmadasReales = rows.filter(r=>{
+                if(r.sinteticaCancelada) return false;
+                const prod = products.find(p=>p.sku===r.sku);
+                return !(prod?.sintetico);
+              }).length;
+              const canceladasConCostoCount = sales.filter(s=> s.ciudad===city && s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0) > 0).length;
+              // Total pedidos (confirmadas reales + sintéticas + canceladas con costo)
+              const unidadesTotales = ventasConfirmadasReales + ventasSinteticas + canceladasConCostoCount;
+              function confirmarCobro(){
+                // Construir snapshot incluso si no hay confirmadas
+                const productTotals = {};
+                rows.forEach(r=>{
+                  if(r.sinteticaCancelada) return;
+                  if(r.sku) productTotals[r.sku] = (productTotals[r.sku]||0) + Number(r.cantidad||0);
+                  if(r.skuExtra) productTotals[r.skuExtra] = (productTotals[r.skuExtra]||0) + Number(r.cantidadExtra||0);
+                });
+                const totalMonto = rows.reduce((a,r)=> a + Number(r.total||0),0);
+                const totalDelivery = rows.reduce((a,r)=> a + Number(r.gasto||0),0);
+                const totalNeto = rows.reduce((a,r)=> a + Number(r.neto||0),0);
+                setDepositSnapshots(prev => [
+                  ...prev,
+                  {
+                    id: uid(),
+                    city,
+                    timestamp: Date.now(),
+                    rows: rows.map(r=> ({...r})),
+                    resumen:{
+                      ventasConfirmadas: ventasConfirmadasReales,
+                      ventasSinteticas,
+                      canceladasConCosto: canceladasConCostoCount,
+                      totalPedidos: unidadesTotales,
+                      totalMonto,
+                      totalDelivery,
+                      totalNeto,
+                      productos: productTotals
+                    }
+                  }
+                ]);
+                // Descontar stock central (solo confirmadas reales, no sintéticas)
+                setProducts(curr=> curr.map(p=>{
+                  const cant = resumenSku[p.sku];
+                  if(!cant) return p;
+                  if(p.sintetico) return p;
+                  return { ...p, stock: Math.max(0, p.stock - cant) };
+                }));
+                // Marcar ventas como liquidadas (settled) en lugar de eliminarlas
+                const settledTs = Date.now();
+                setSales(prev=> prev.map(s=> {
+                  if(s.ciudad !== city) return s;
+                  const esConfirmada = (s.estadoEntrega||'confirmado')==='confirmado';
+                  const esCanceladaConCosto = s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0) > 0;
+                  if(esConfirmada || esCanceladaConCosto) {
+                    if(s.settledAt) return s; // ya marcado
+                    return { ...s, settledAt: settledTs };
+                  }
+                  return s;
+                }));
+                // Cerrar y navegar inmediatamente
+                setCobrarOpen(false);
+                setView('deposit');
+              }
+              return (
+                <div className="w-full max-w-[440px] space-y-4">
+                  <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2">Confirmar Limpieza</h3>
+                  <div className="text-[12px] leading-relaxed text-neutral-300 space-y-2">
+                    <p>Al confirmar se eliminarán las ventas CONFIRMADAS y las CANCELADAS con costo de esta ciudad. Las entregas pendientes permanecen. Se descuenta del stock central solo lo confirmado (productos no sintéticos).</p>
+                    <div className="text-[12px] bg-neutral-800/60 border border-neutral-700 rounded-lg px-3 py-2 flex flex-col gap-1">
+                      <span><span className="text-neutral-400">Ventas confirmadas:</span> <span className="font-semibold text-[#e7922b]">{ventasConfirmadasReales}</span></span>
+                      <span><span className="text-neutral-400">Ventas sintéticas:</span> <span className="font-semibold text-[#e7922b]">{ventasSinteticas}</span></span>
+                      <span><span className="text-neutral-400">Pedidos cancelados (con costo):</span> <span className="font-semibold text-red-400">{canceladasConCostoCount}</span></span>
+                      <span><span className="text-neutral-400">Total pedidos (incluye sintéticos y cancelados con costo):</span> <span className="font-semibold text-[#e7922b]">{unidadesTotales}</span></span>
+                      <span className="text-[10px] text-neutral-500">(Detalle oculto)</span>
+                    </div>
+                    <p className="text-yellow-400 text-[11px]">Se descuenta stock solo de productos NO sintéticos. Pendientes NO se borran. Los despachos (envíos) NO se tocan. Acción irreversible.</p>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button onClick={()=>setCobrarOpen(false)} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+                    <button onClick={confirmarCobro} className="px-5 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Confirmar</button>
+                  </div>
+                </div>
+              );
+            })()}
+          </Modal>
+        )}
         {openComp && (
           <Modal onClose={()=>setOpenComp(null)}>
             <div className="space-y-3 w-[360px]">
@@ -3000,6 +3828,98 @@ function CitySummary({ city, sales, products }) {
               <div className="text-[10px] text-neutral-500">Archivo almacenado localmente.</div>
               <div className="flex justify-end">
                 <button onClick={()=>setOpenComp(null)} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Cerrar</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {editingSale && (
+          <Modal onClose={()=>setEditingSale(null)} autoWidth>
+            <div className="w-full max-w-[520px] space-y-4">
+              <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2">Editar Venta</h3>
+              <div className="grid grid-cols-2 gap-3 text-[11px]">
+                <label className="flex flex-col gap-1">Fecha
+                  <input type="date" value={editForm.fecha} onChange={e=>updateEditField('fecha', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">Hora
+                  <input value={editForm.horaEntrega} onChange={e=>updateEditField('horaEntrega', e.target.value)} placeholder="10:00 AM" className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">Ciudad
+                  <input value={editForm.ciudad} onChange={e=>updateEditField('ciudad', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">Método
+                  <select value={editForm.metodo} onChange={e=>updateEditField('metodo', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                    <option value="Delivery">Delivery</option>
+                    <option value="Encomienda">Encomienda</option>
+                  </select>
+                </label>
+                {editForm.metodo==='Encomienda' && (
+                  <label className="flex flex-col gap-1 col-span-2">Destino Encomienda
+                    <input value={editForm.destinoEncomienda} onChange={e=>updateEditField('destinoEncomienda', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                  </label>
+                )}
+                <label className="flex flex-col gap-1">Vendedor(a)
+                  <input value={editForm.vendedora} onChange={e=>updateEditField('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">Celular
+                  <input value={editForm.celular} onChange={e=>updateEditField('celular', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">SKU
+                  <select value={editForm.sku} onChange={e=>updateEditField('sku', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                    <option value="">—</option>
+                    {products.map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">Cant
+                  <input type="number" value={editForm.cantidad} onChange={e=>updateEditField('cantidad', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">SKU Extra
+                  <select value={editForm.skuExtra} onChange={e=>updateEditField('skuExtra', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                    <option value="">—</option>
+                    {products.map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">Cant Extra
+                  <input type="number" value={editForm.cantidadExtra} onChange={e=>updateEditField('cantidadExtra', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">Monto (Total)
+                  <input type="number" value={editForm.total} onChange={e=>updateEditField('total', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <label className="flex flex-col gap-1">Delivery (Gasto)
+                  <input type="number" value={editForm.gasto} onChange={e=>updateEditField('gasto', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+                <div className="col-span-2 text-[10px] text-neutral-500">Neto se recalcula automáticamente: <span className="text-[#e7922b] font-semibold">{currency((Number(editForm.total)||0)-(Number(editForm.gasto)||0))}</span></div>
+              </div>
+              <div className="flex justify-between gap-2 pt-1">
+                <div className="flex gap-2">
+                  <button onClick={()=>setConfirmDeleteSale(true)} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold text-white">Eliminar</button>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setEditingSale(null)} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+                  <button onClick={saveEditSale} className="px-5 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Guardar</button>
+                </div>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {confirmDeleteSale && editingSale && (
+          <Modal onClose={()=>setConfirmDeleteSale(false)} autoWidth>
+            <div className="w-full max-w-[420px] space-y-4">
+              <h3 className="text-sm font-semibold text-red-400 flex items-center gap-2">Confirmar Eliminación</h3>
+              <div className="text-[12px] leading-relaxed text-neutral-300 space-y-2">
+                <p>¿Seguro que deseas eliminar este pedido? Esta acción no se puede deshacer.</p>
+                <div className="bg-neutral-800/60 rounded-lg p-3 border border-neutral-700 text-[11px] space-y-1">
+                  <div><span className="text-neutral-400">Fecha:</span> {toDMY(editingSale.fecha)}</div>
+                  <div><span className="text-neutral-400">Ciudad:</span> {editingSale.ciudad}</div>
+                  <div><span className="text-neutral-400">Usuario:</span> {firstName(editingSale.vendedora||editingSale.vendedor)}</div>
+                  <div><span className="text-neutral-400">Productos:</span> {[editingSale.sku, editingSale.skuExtra].filter(Boolean).join(' + ')||'—'}</div>
+                  <div><span className="text-neutral-400">Cant:</span> {[editingSale.cantidad, editingSale.cantidadExtra].filter(x=>x).join(' + ')||'—'}</div>
+                  <div><span className="text-neutral-400">Monto:</span> {currency(editingSale.total||0)}</div>
+                  <div><span className="text-neutral-400">Delivery:</span> {currency(editingSale.gasto||0)}</div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={()=>setConfirmDeleteSale(false)} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+                <button onClick={deleteEditingSale} className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold text-white">Eliminar</button>
               </div>
             </div>
           </Modal>
@@ -3028,16 +3948,19 @@ function CitySummary({ city, sales, products }) {
                 </thead>
                 <tbody>
                   {rows.map(r=>{
-                    const cantidades = productOrder.map(sku=>{ let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
+                    const esCancelada = !!r.sinteticaCancelada;
+                    const cantidades = productOrder.map(sku=>{
+                      if(esCancelada) return 0; // no mostrar productos
+                      let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
                     return (
-                      <tr key={r.id} className="border-t border-neutral-800">
+                      <tr key={r.id} className={"border-t border-neutral-800 "+(esCancelada? 'bg-red-900/10':'')}>
                         <td className="px-1 py-0.5 whitespace-nowrap">{toDMY(r.fecha)}</td>
                         <td className="px-1 py-0.5 whitespace-nowrap">{r.hora}</td>
                         <td className="px-1 py-0.5 whitespace-nowrap">{r.ciudad}</td>
-                        <td className="px-1 py-0.5 text-left max-w-[140px] truncate">{r.metodo==='Encomienda'? r.destinoEncomienda||'' : ''}</td>
+                        <td className="px-1 py-0.5 text-left max-w-[140px] truncate">{r.metodo==='Encomienda'? (r.destinoEncomienda||'') : (r.motivo? r.motivo : '')}</td>
                         {cantidades.map((c,i)=> <td key={i} className="px-1 py-0.5 text-center">{c||''}</td>)}
-                        <td className="px-1 py-0.5 text-right">{r.gasto?currency(r.gasto):''}</td>
-                        <td className="px-1 py-0.5 text-right font-semibold">{currency(r.neto)}</td>
+                        <td className={"px-1 py-0.5 text-right "+(esCancelada? 'text-red-400 font-semibold':'')}>{esCancelada? 'Cancelado '+currency(r.gastoCancelacion||0) : (r.gasto?currency(r.gasto):'')}</td>
+                        <td className={"px-1 py-0.5 text-right font-semibold "+(esCancelada? 'text-red-400':'')}>{currency(r.neto)}</td>
                         <td className="px-1 py-0.5 text-center whitespace-nowrap">{r.celular||''}</td>
                       </tr>
                     );
@@ -3046,8 +3969,8 @@ function CitySummary({ city, sales, products }) {
                 </tbody>
                 {rows.length>0 && (()=>{
                   const totSku = {};
-                  rows.forEach(r=>{ if(r.sku) totSku[r.sku]=(totSku[r.sku]||0)+Number(r.cantidad||0); if(r.skuExtra) totSku[r.skuExtra]=(totSku[r.skuExtra]||0)+Number(r.cantidadExtra||0); });
-                  const sumDelivery = rows.reduce((a,r)=> a + Number(r.gasto||0),0);
+                  rows.forEach(r=>{ if(r.sinteticaCancelada) return; if(r.sku) totSku[r.sku]=(totSku[r.sku]||0)+Number(r.cantidad||0); if(r.skuExtra) totSku[r.skuExtra]=(totSku[r.skuExtra]||0)+Number(r.cantidadExtra||0); });
+                  const sumDelivery = rows.reduce((a,r)=> a + (r.sinteticaCancelada? Number(r.gastoCancelacion||0): Number(r.gasto||0)),0);
                   const sumTotal = rows.reduce((a,r)=> a + Number(r.neto||0),0);
                   return (
                     <tfoot>
@@ -3066,6 +3989,283 @@ function CitySummary({ city, sales, products }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------- Vista Confirmar Depósito ----------------------
+function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBack }) {
+  const [activeId, setActiveId] = useState(()=> snapshots?.length ? snapshots[snapshots.length-1].id : null); // última añadida
+  const active = snapshots.find(s=>s.id===activeId) || null;
+  const [montoDepositado, setMontoDepositado] = useState('');
+  const [nota, setNota] = useState('');
+  const [editingRow, setEditingRow] = useState(null);
+  const [formValues, setFormValues] = useState({ total:'', gasto:'', gastoCancel:'', cantidad:'', cantidadExtra:'', sku:'', skuExtra:'' });
+  const [confirmingDeposit, setConfirmingDeposit] = useState(null); // { amount, note }
+  function recompute(rows){
+    const ventasSinteticas = rows.filter(r=> !r.sinteticaCancelada && products.find(p=>p.sku===r.sku)?.sintetico).length;
+    const ventasConfirmadas = rows.filter(r=> !r.sinteticaCancelada && !products.find(p=>p.sku===r.sku)?.sintetico).length;
+    const canceladasConCosto = rows.filter(r=> r.sinteticaCancelada).length;
+    const productTotals = {};
+    rows.forEach(r=>{ if(r.sinteticaCancelada) return; if(r.sku) productTotals[r.sku]=(productTotals[r.sku]||0)+Number(r.cantidad||0); if(r.skuExtra) productTotals[r.skuExtra]=(productTotals[r.skuExtra]||0)+Number(r.cantidadExtra||0); });
+    const totalMonto = rows.reduce((a,r)=> a + Number(r.total||0),0);
+    const totalDelivery = rows.reduce((a,r)=> a + Number(r.gasto||0),0);
+    const totalNeto = rows.reduce((a,r)=> a + Number(r.neto||0),0);
+    return { ventasConfirmadas, ventasSinteticas, canceladasConCosto, totalPedidos: ventasConfirmadas+ventasSinteticas+canceladasConCosto, totalMonto, totalDelivery, totalNeto, productos: productTotals };
+  }
+  function patchActive(mutator){
+    setSnapshots(prev => prev.map(s=> s.id===activeId ? mutator(s) : s));
+  }
+  function openEdit(r){
+    setEditingRow(r);
+    setFormValues({ 
+      total: r.sinteticaCancelada? '': String(r.total||0), 
+      gasto: r.sinteticaCancelada? '': String(r.gasto||0), 
+      gastoCancel: r.sinteticaCancelada? String(r.gastoCancelacion||0): '',
+      cantidad: String(r.cantidad||''),
+      cantidadExtra: String(r.cantidadExtra||''),
+      sku: r.sku||'',
+      skuExtra: r.skuExtra||''
+    });
+  }
+  function closeEdit(){ setEditingRow(null); }
+  function updateForm(field,val){ setFormValues(f=>({...f,[field]:val})); }
+  function saveEdit(e){ 
+    e.preventDefault(); if(!editingRow) return; 
+    patchActive(prev=>{ 
+      const rows = prev.rows.map(r=>{ 
+        if(r.id!==editingRow.id) return r; 
+        if(r.sinteticaCancelada){ 
+          const gc=Math.max(0,Number(formValues.gastoCancel||0)||0); 
+          return { ...r, gastoCancelacion:gc, neto:-gc }; 
+        } else { 
+          const t=Math.max(0,Number(formValues.total||0)||0); 
+          const g=Math.max(0,Number(formValues.gasto||0)||0); 
+          const cant = Math.max(0, Number(formValues.cantidad||0)||0); 
+          const cantExtra = Math.max(0, Number(formValues.cantidadExtra||0)||0); 
+          return { ...r, total:t, gasto:g, neto:t-g, cantidad:cant, cantidadExtra:cantExtra, sku: formValues.sku||'', skuExtra: formValues.skuExtra||'' }; 
+        } 
+      }); 
+      return { ...prev, rows, resumen: recompute(rows) }; 
+    }); 
+    // Persistir cambios en la venta original (solo si no es sintética cancelada)
+    setSales(prev => prev.map(s=>{
+      if(s.id!==editingRow.id) return s;
+      if(editingRow.sinteticaCancelada){
+        const gc=Math.max(0,Number(formValues.gastoCancel||0)||0);
+        return { ...s, gastoCancelacion: gc };
+      } else {
+        const t=Math.max(0,Number(formValues.total||0)||0);
+        const g=Math.max(0,Number(formValues.gasto||0)||0);
+        const cant = Math.max(0, Number(formValues.cantidad||0)||0);
+        const cantExtra = Math.max(0, Number(formValues.cantidadExtra||0)||0);
+        return { ...s, total:t, gasto:g, neto:t-g, cantidad:cant, cantidadExtra:cantExtra, sku: formValues.sku||'', skuExtra: formValues.skuExtra||'' };
+      }
+    }));
+    setEditingRow(null); 
+  }
+  function deleteRow(id){ if(!window.confirm('¿Eliminar este pedido de la lista de depósito?')) return; patchActive(prev=>{ const rows = prev.rows.filter(r=>r.id!==id); return { ...prev, rows, resumen: recompute(rows) }; }); }
+  function markSaved(amount, note){
+    if(!active) return;
+    patchActive(prev=> ({ ...prev, depositAmount: amount, depositNote: note||'', savedAt: Date.now() }));
+  }
+  function finalizeDeposit(){
+    if(!active || !confirmingDeposit) return;
+    const { amount, note } = confirmingDeposit;
+    markSaved(amount, note);
+    // Eliminar snapshot de la lista (ya confirmado)
+    setSnapshots(prev => prev.filter(s=> s.id!==active.id));
+    // Elegir nueva activa
+    setTimeout(()=> {
+      setConfirmingDeposit(null);
+      setMontoDepositado(''); setNota('');
+      // Actualizar activeId tras eliminación
+      setSnapshots(prev => { // necesitamos leer nuevos snapshots para activeId: usar callback en setSnapshots? ya eliminamos arriba; fallback en efecto siguiente render
+        return prev; // no muta, solo placeholder
+      });
+    },0);
+  }
+  const orderedSkus = products.map(p=>p.sku);
+  if(!snapshots.length){
+    return (
+      <div className="flex-1 p-6 bg-[#121f27] overflow-auto">
+        <div className="max-w-4xl mx-auto">
+          <header className="mb-6 flex items-center justify-between">
+            <h2 className="text-xl font-semibold flex items-center gap-2"><CircleDollarSign className="w-5 h-5 text-[#f09929]" /> Confirmar Depósito</h2>
+            <button onClick={onBack} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Volver</button>
+          </header>
+          <div className="text-neutral-400 text-sm">No hay limpiezas pendientes de depósito.</div>
+        </div>
+      </div>
+    );
+  }
+  const resumen = active?.resumen||{};
+  return (
+    <div className="flex-1 p-6 bg-[#121f27] overflow-auto space-y-6">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-xl font-semibold flex items-center gap-2"><CircleDollarSign className="w-5 h-5 text-[#f09929]" /> Confirmar Depósito</h2>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            {snapshots.map(s=>{
+              const activeFlag = s.id===activeId;
+              return (
+                <button key={s.id} onClick={()=>setActiveId(s.id)} className={"px-3 py-1 rounded-full border text-xs "+(activeFlag? 'bg-[#e7922b] text-[#1a2430] border-[#e7922b]':'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700')}>
+                  {s.city} · {new Date(s.timestamp).toLocaleTimeString()} {s.savedAt && '✓'}
+                </button>
+              );
+            })}
+          </div>
+          {active && <p className="text-sm text-neutral-400">Detalle de la limpieza de <span className="text-[#e7922b] font-semibold">{active.city}</span> realizada el {new Date(active.timestamp).toLocaleString()}.</p>}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onBack} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Volver</button>
+        </div>
+      </header>
+      {!active && <div className="text-neutral-400 text-sm">Selecciona una limpieza.</div>}
+      {active && (
+        <>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-[#0f171e] border border-neutral-800 text-[12px] space-y-1">
+              <div><span className="text-neutral-400">Pedidos confirmados:</span> <span className="font-semibold text-[#e7922b]">{resumen.ventasConfirmadas}</span></div>
+              <div><span className="text-neutral-400">Pedidos sintéticos:</span> <span className="font-semibold text-[#e7922b]">{resumen.ventasSinteticas}</span></div>
+              <div><span className="text-neutral-400">Cancelados c/costo:</span> <span className="font-semibold text-red-400">{resumen.canceladasConCosto}</span></div>
+              <div><span className="text-neutral-400">Total pedidos:</span> <span className="font-semibold text-[#e7922b]">{resumen.totalPedidos}</span></div>
+            </div>
+            <div className="p-4 rounded-2xl bg-[#0f171e] border border-neutral-800 text-[12px] space-y-1">
+              <div><span className="text-neutral-400">Monto bruto:</span> {currency(resumen.totalMonto||0)}</div>
+              <div><span className="text-neutral-400">Delivery:</span> {currency(resumen.totalDelivery||0)}</div>
+              <div><span className="text-neutral-400">Neto:</span> <span className="font-semibold text-[#e7922b]">{currency(resumen.totalNeto||0)}</span></div>
+            </div>
+            <form onSubmit={e=>{ e.preventDefault(); const amount = montoDepositado? Number(montoDepositado): resumen.totalNeto; setConfirmingDeposit({ amount, note: nota }); }} className="p-4 rounded-2xl bg-[#0f171e] border border-neutral-800 text-[12px] space-y-2">
+              <div className="font-semibold text-[#e7922b] text-sm mb-1">Registrar Depósito</div>
+              <label className="flex flex-col gap-1">Monto depositado
+                <input value={montoDepositado} onChange={e=>setMontoDepositado(e.target.value)} placeholder={currency(resumen.totalNeto||0)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+              </label>
+              <label className="flex flex-col gap-1">Nota (opcional)
+                <textarea value={nota} onChange={e=>setNota(e.target.value)} rows={2} className="bg-neutral-800 rounded-lg px-2 py-1 resize-none" />
+              </label>
+              <div className="text-[10px] text-neutral-500">Al confirmar se registrará y se quitará esta limpieza de la lista.</div>
+              <div className="flex justify-end">
+                <button className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold">{active.savedAt? 'Actualizar':'Confirmar'}</button>
+              </div>
+            </form>
+          </div>
+          <div className="rounded-2xl bg-[#0f171e] border border-neutral-800 p-4 overflow-auto">
+            <div className="text-sm font-semibold mb-3">Pedidos incluidos en la limpieza</div>
+            <table className="w-full text-[11px] min-w-[1180px]">
+          <thead className="bg-neutral-800/60">
+            <tr>
+              <th className="p-2 text-left">Fecha</th>
+              <th className="p-2 text-left">Hora</th>
+              <th className="p-2 text-left">Ciudad</th>
+               <th className="p-2 text-left">Encomienda</th>
+              {orderedSkus.map(sku=>{
+                const prod = products.find(p=>p.sku===sku); return <th key={sku} className="p-2 text-center whitespace-nowrap">{prod?.nombre.split(' ')[0]}</th>;
+              })}
+              <th className="p-2 text-right">Monto</th>
+              <th className="p-2 text-right">Delivery</th>
+              <th className="p-2 text-right">Neto</th>
+              <th className="p-2 text-center">Celular</th>
+              <th className="p-2 text-center">Editar</th>
+      <th className="p-2 text-center">Eliminar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {active.rows.map(r=>{
+              const esCanc = !!r.sinteticaCancelada;
+              const cantidades = orderedSkus.map(sku=>{
+                if(esCanc) return 0; let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
+              return (
+                <tr key={r.id} className="border-t border-neutral-800">
+                  <td className="p-2">{toDMY(r.fecha)}</td>
+                  <td className="p-2">{r.hora}</td>
+                  <td className="p-2">{r.ciudad}</td>
+                  <td className="p-2 text-left max-w-[160px] truncate">{r.metodo==='Encomienda'? (r.destinoEncomienda||'') : (r.motivo|| (esCanc? 'Cancelado' : ''))}</td>
+                  {cantidades.map((c,i)=><td key={i} className="p-2 text-center">{c||''}</td>)}
+                  <td className="p-2 text-right font-semibold">{currency(r.total||0)}</td>
+                  <td className={"p-2 text-right "+(esCanc? 'text-red-400':'')}>{esCanc? currency(r.gastoCancelacion||0): (r.gasto? currency(r.gasto):'')}</td>
+                  <td className={"p-2 text-right font-semibold "+(esCanc? 'text-red-400':'')}>{currency(r.neto||0)}</td>
+                  <td className="p-2 text-center">{r.celular||''}</td>
+                  <td className="p-2 text-center"><button onClick={()=>openEdit(r)} className="px-2 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-[10px] border border-neutral-700">Editar</button></td>
+      <td className="p-2 text-center"><button onClick={()=>deleteRow(r.id)} className="px-2 py-1 rounded-lg bg-red-600/70 hover:bg-red-600 text-[10px] border border-red-500/60 text-white">X</button></td>
+                </tr>
+              );
+            })}
+    {!active.rows.length && <tr><td colSpan={orderedSkus.length+10} className="p-6 text-center text-neutral-500 text-sm">Sin datos</td></tr>}
+          </tbody>
+          {active.rows.length>0 && ( ()=>{ const totSku={}; active.rows.forEach(r=>{ if(r.sinteticaCancelada) return; if(r.sku) totSku[r.sku]=(totSku[r.sku]||0)+Number(r.cantidad||0); if(r.skuExtra) totSku[r.skuExtra]=(totSku[r.skuExtra]||0)+Number(r.cantidadExtra||0); }); return (<tfoot><tr className="border-t border-neutral-800 bg-neutral-900/40"><td className="p-2 text-[10px] font-semibold text-neutral-400" colSpan={4}>Totales</td>{orderedSkus.map(sku=> <td key={sku} className="p-2 text-center font-semibold text-[#e7922b]">{totSku[sku]||''}</td>)}<td className="p-2 text-right font-bold text-[#e7922b]">{currency(resumen.totalMonto||0)}</td><td className="p-2 text-right font-bold text-[#e7922b]">{resumen.totalDelivery? currency(resumen.totalDelivery):''}</td><td className="p-2 text-right font-bold text-[#e7922b]">{currency(resumen.totalNeto||0)}</td><td className="p-2"></td><td className="p-2"></td><td className="p-2"></td></tr></tfoot>); })()}
+        </table>
+          </div>
+        </>
+      )}
+      {editingRow && (
+        <Modal onClose={closeEdit} autoWidth>
+          <form onSubmit={saveEdit} className="w-full max-w-[420px] space-y-4 text-[12px]">
+            <h3 className="text-sm font-semibold text-[#e7922b] flex items-center gap-2">Editar Pedido</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2 text-[10px] text-neutral-500">ID: {editingRow.id.slice(-8)}</div>
+              <label className="flex flex-col gap-1 col-span-2">Fecha
+                <input disabled value={toDMY(editingRow.fecha)} className="bg-neutral-800 rounded-lg px-2 py-1 opacity-60" />
+              </label>
+              {!editingRow.sinteticaCancelada && (
+                <>
+                  <label className="flex flex-col gap-1">Monto
+                    <input value={formValues.total} onChange={e=>updateForm('total', e.target.value)} type="number" step="0.01" className="bg-neutral-800 rounded-lg px-2 py-1" />
+                  </label>
+                  <label className="flex flex-col gap-1">Delivery
+                    <input value={formValues.gasto} onChange={e=>updateForm('gasto', e.target.value)} type="number" step="0.01" className="bg-neutral-800 rounded-lg px-2 py-1" />
+                  </label>
+                  <label className="flex flex-col gap-1">SKU
+                    <select value={formValues.sku} onChange={e=>updateForm('sku', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                      <option value="">—</option>
+                      {products.map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">Cant
+                    <input value={formValues.cantidad} onChange={e=>updateForm('cantidad', e.target.value)} type="number" className="bg-neutral-800 rounded-lg px-2 py-1" />
+                  </label>
+                  <label className="flex flex-col gap-1">SKU Extra
+                    <select value={formValues.skuExtra} onChange={e=>updateForm('skuExtra', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                      <option value="">—</option>
+                      {products.map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">Cant Extra
+                    <input value={formValues.cantidadExtra} onChange={e=>updateForm('cantidadExtra', e.target.value)} type="number" className="bg-neutral-800 rounded-lg px-2 py-1" />
+                  </label>
+                </>
+              )}
+              {editingRow.sinteticaCancelada && (
+                <label className="flex flex-col gap-1 col-span-2">Gasto cancelación
+                  <input value={formValues.gastoCancel} onChange={e=>updateForm('gastoCancel', e.target.value)} type="number" step="0.01" className="bg-neutral-800 rounded-lg px-2 py-1" />
+                </label>
+              )}
+              <div className="col-span-2 text-[10px] text-neutral-500">Neto calculado: {editingRow.sinteticaCancelada ? '-'+currency(Math.max(0, Number(formValues.gastoCancel||0))) : currency(Math.max(0, Number(formValues.total||0)) - Math.max(0, Number(formValues.gasto||0)))} </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={closeEdit} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
+              <button type="submit" className="px-5 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Guardar</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {confirmingDeposit && active && (
+        <Modal onClose={()=> setConfirmingDeposit(null)} autoWidth>
+          <div className="w-full max-w-[400px] px-1 space-y-5">
+            <h3 className="text-sm font-semibold text-[#e7922b]">Confirmar Depósito</h3>
+            <div className="text-xs text-neutral-300 leading-relaxed space-y-2">
+              <p>Ciudad: <span className="font-semibold text-neutral-100">{active.city}</span></p>
+              <p>Monto a registrar: <span className="font-semibold text-[#e7922b]">{currency(confirmingDeposit.amount)}</span></p>
+              {confirmingDeposit.note && <p>Nota: <span className="text-neutral-400">{confirmingDeposit.note}</span></p>}
+              <p className="text-[10px] text-neutral-500">Esta acción registrará el depósito y eliminará esta limpieza de la lista. No podrás editarla luego.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={()=> setConfirmingDeposit(null)} className="px-4 py-2 rounded-xl bg-neutral-700 text-xs">Volver</button>
+              <button onClick={finalizeDeposit} className="px-5 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Sí, Confirmar</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

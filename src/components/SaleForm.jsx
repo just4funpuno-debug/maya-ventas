@@ -60,6 +60,8 @@ export default function SaleForm({ products, session, onSubmit }) {
     });
   }
 
+  const prodActual = visibleProducts.find(p=>p.sku===sku);
+  const esSintetico = !!prodActual?.sintetico;
   return (
     <form onSubmit={submit} className="space-y-3">
       <h3 className="font-semibold text-lg mb-1 flex items-center gap-2">
@@ -109,49 +111,53 @@ export default function SaleForm({ products, session, onSubmit }) {
         <div className="col-span-2 text-xs text-neutral-500 -mt-2">
           Producto principal ya fue elegido al iniciar. ({(visibleProducts.find(p=>p.sku===sku)?.nombre)||'—'})
         </div>
-        <div>
-          <label className="text-sm">Cantidad</label>
-          <input type="number" min={1} value={cantidad} onChange={e=>setCantidad(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-        </div>
-        <div>
-          <label className="text-sm">Precio TOTAL</label>
-          <input type="number" step="0.01" value={precioTotal} onChange={e=>setPrecioTotal(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
-        </div>
-        <div>
-          <label className="text-sm">Producto adicional (opcional)</label>
-          <select value={skuExtra} onChange={e=>setSkuExtra(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
-            <option value="">— Ninguno —</option>
-            {visibleProducts.filter(p=>p.sku!==sku).map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-sm">Cantidad adicional</label>
-            <input type="number" min={0} value={cantidadExtra} onChange={e=>setCantidadExtra(e.target.value)} disabled={!skuExtra} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-50" />
-        </div>
-        <div>
-          <label className="text-sm">Método de pago</label>
-          <select value={metodo} onChange={e=>setMetodo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
-            <option value="Efectivo">Efectivo</option>
-            <option value="Deposito QR">Deposito QR</option>
-          </select>
-          {metodo === 'Deposito QR' && (
-            <div className="mt-2 text-xs space-y-1">
-              <input type="file" accept="image/*,.pdf" onChange={async e=>{
-                const f = e.target.files?.[0]; if(!f){ setComprobanteFile(null); return; }
-                if(f.size > 2*1024*1024){ alert('Archivo supera 2MB'); return; }
-                const reader = new FileReader();
-                reader.onload = ev=> setComprobanteFile(ev.target?.result || null);
-                reader.readAsDataURL(f);
-              }} className="text-xs" />
-              <div className="text-[10px] text-neutral-500">Sube comprobante (máx 2MB). Se guarda local.</div>
-              {comprobanteFile && <div className="text-[10px] text-green-400">Comprobante adjuntado</div>}
+        {!esSintetico && (
+          <>
+            <div>
+              <label className="text-sm">Cantidad</label>
+              <input type="number" min={1} value={cantidad} onChange={e=>setCantidad(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
             </div>
-          )}
-        </div>
-        <div>
-          <label className="text-sm">Celular</label>
-          <input value={celular} onChange={e=>setCelular(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Número" />
-        </div>
+            <div>
+              <label className="text-sm">Precio TOTAL</label>
+              <input type="number" step="0.01" value={precioTotal} onChange={e=>setPrecioTotal(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" />
+            </div>
+            <div>
+              <label className="text-sm">Producto adicional (opcional)</label>
+              <select value={skuExtra} onChange={e=>setSkuExtra(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
+                <option value="">— Ninguno —</option>
+                {visibleProducts.filter(p=>p.sku!==sku).map(p=> <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm">Cantidad adicional</label>
+                <input type="number" min={0} value={cantidadExtra} onChange={e=>setCantidadExtra(e.target.value)} disabled={!skuExtra} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-50" />
+            </div>
+            <div>
+              <label className="text-sm">Método de pago</label>
+              <select value={metodo} onChange={e=>setMetodo(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1">
+                <option value="Efectivo">Efectivo</option>
+                <option value="Deposito QR">Deposito QR</option>
+              </select>
+              {metodo === 'Deposito QR' && (
+                <div className="mt-2 text-xs space-y-1">
+                  <input type="file" accept="image/*,.pdf" onChange={async e=>{
+                    const f = e.target.files?.[0]; if(!f){ setComprobanteFile(null); return; }
+                    if(f.size > 2*1024*1024){ alert('Archivo supera 2MB'); return; }
+                    const reader = new FileReader();
+                    reader.onload = ev=> setComprobanteFile(ev.target?.result || null);
+                    reader.readAsDataURL(f);
+                  }} className="text-xs" />
+                  <div className="text-[10px] text-neutral-500">Sube comprobante (máx 2MB). Se guarda local.</div>
+                  {comprobanteFile && <div className="text-[10px] text-green-400">Comprobante adjuntado</div>}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-sm">Celular</label>
+              <input value={celular} onChange={e=>setCelular(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Número" />
+            </div>
+          </>
+        )}
         <div className="col-span-2">
           <label className="text-sm">Notas</label>
           <textarea value={notas} onChange={e=>setNotas(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Observaciones" />
