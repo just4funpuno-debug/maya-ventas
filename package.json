@@ -10,13 +10,14 @@
     "migrate:images": "node scripts/migrate-images-to-public.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.56.1",
+    "cloudinary": "^1.41.3",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.453.0",
     "papaparse": "^5.4.1",
     "react": "^18.2.0",
-  "react-dom": "^18.2.0",
-  "recharts": "^2.12.0",
-  "cloudinary": "^1.41.3"
+    "react-dom": "^18.2.0",
+    "recharts": "^2.12.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",

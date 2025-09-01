@@ -7,8 +7,15 @@ export async function getSignature(params = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)
   });
-  if (!resp.ok) throw new Error('No se pudo obtener firma');
-  return resp.json();
+  let json = null;
+  let rawText = '';
+  try { rawText = await resp.text(); json = JSON.parse(rawText); } catch { /* ignore parse */ }
+  if (!resp.ok) {
+    const msg = json?.error || json?.details || rawText || ('No se pudo obtener firma ('+resp.status+')');
+    throw new Error('firma_error: '+msg);
+  }
+  if(!json) throw new Error('Respuesta vacía de firma');
+  return json;
 }
 
 export async function uploadProductImage(file, opts = {}) {
@@ -27,4 +34,21 @@ export async function uploadProductImage(file, opts = {}) {
   const json = await resp.json();
   if (!resp.ok || json.error) throw new Error(json.error?.message || 'Error al subir');
   return json; // includes secure_url, public_id
+}
+
+export async function deleteProductImage(public_id){
+  if(!public_id) return { skipped: true };
+  try {
+    const resp = await fetch('/api/cloudinary-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public_id })
+    });
+    let data=null; try { data = await resp.json(); } catch { /* ignore */ }
+    if(!resp.ok){ throw new Error(data?.error||('No se pudo borrar ('+resp.status+')')); }
+    return { ok:true, result:data };
+  } catch(err){
+    console.warn('[cloudinary delete] fallo', public_id, err.message);
+    return { ok:false, error:err.message };
+  }
 }

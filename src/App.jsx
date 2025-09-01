@@ -4,9 +4,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Toolti
 import {
   LogIn, LogOut, ShoppingCart, CircleDollarSign, TrendingUp, AlertTriangle, Upload, Plus,
   Package, FileSpreadsheet, Wallet, Settings, X, UserPlus, MapPin, Search, Plane, Clock, Check, History,
-  ArrowLeft, ArrowRight, MessageSquare
+  ArrowLeft, ArrowRight, MessageSquare, Home
 } from "lucide-react";
 import Papa from "papaparse";
+import { supabase, fetchAll, upsert, clearTable } from './supabaseClient';
 
 // ---------------------- Helpers ----------------------
 const currency = (n, cur = "BOB") =>
@@ -31,8 +32,30 @@ function nowBoliviaMinutes(){
   const [h,m] = time.split(':');
   return Number(h)*60 + Number(m);
 }
-const uid = () => Math.random().toString(36).slice(2, 10);
+// Generador de IDs: si hay Supabase usamos UUID (requerido por columnas uuid) para que los upsert no fallen.
+const uid = () => {
+  try {
+    if (supabase && typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  } catch { /* ignore */ }
+  // Fallback: generar UUID v4 manual (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
+  const rnd = (len) => {
+    let out='';
+    for(let i=0;i<len;i++){ out += ((Math.random()*16)|0).toString(16); }
+    return out;
+  };
+  const part1 = rnd(8);
+  const part2 = rnd(4);
+  const part3 = '4' + rnd(3); // version 4
+  const part4 = ((8 + ((Math.random()*4)|0)).toString(16)) + rnd(3); // variant 8..b
+  const part5 = rnd(12);
+  return `${part1}-${part2}-${part3}-${part4}-${part5}`;
+};
 const firstName = (n='') => n.split(' ')[0] || '';
+
+// Detecta si un string ya es UUID v4 (simplificado)
+function isProbablyUUID(id){
+  return typeof id === 'string' && /^[0-9a-fA-F-]{36}$/.test(id);
+}
 
 // ---- Formato hora 12h helpers ----
 function to12From24(hhmm='') {
@@ -150,6 +173,39 @@ const FRASES_MOTIVACION = [
   "Tu mejor script es comprender el problema real del cliente."
 ];
 
+// --- Activación sencilla de debug en móvil ---
+// Opciones:
+//  1) Añade ?debug o #debug a la URL -> activa _SYNC_DEBUG y persiste en localStorage.
+//  2) Usa localStorage.setItem('ventas.debug','1') y recarga.
+//  3) Ejecuta window.toggleSyncDebug() para alternar.
+// Flag global de debug (usado para envolver console.logs). Se recalcula al togglear.
+let __DBG = false;
+
+try {
+  if (typeof window !== 'undefined') {
+    if (location.search.includes('debug') || location.hash.includes('debug')) {
+      window._SYNC_DEBUG = true;
+    }
+    if (localStorage.getItem('ventas.debug') === '1') {
+      window._SYNC_DEBUG = true;
+    }
+    if (window._SYNC_DEBUG) {
+      localStorage.setItem('ventas.debug','1');
+    }
+    window.toggleSyncDebug = function(on){
+      if(on===undefined) on = !window._SYNC_DEBUG;
+      window._SYNC_DEBUG = !!on;
+      if(window._SYNC_DEBUG) localStorage.setItem('ventas.debug','1'); else localStorage.removeItem('ventas.debug');
+      __DBG = !!(import.meta?.env?.DEV) && !!window._SYNC_DEBUG;
+      if(__DBG) console.log('[DEBUG] _SYNC_DEBUG =', window._SYNC_DEBUG);
+      return window._SYNC_DEBUG;
+    };
+    // Calcular al cargar
+    __DBG = !!(import.meta?.env?.DEV) && !!window._SYNC_DEBUG;
+    if(__DBG) console.log('[DEBUG] _SYNC_DEBUG =', window._SYNC_DEBUG);
+  }
+} catch { /* ignore */ }
+
 function horaBolivia() {
   const h = new Intl.DateTimeFormat('en-GB',{ timeZone:'America/La_Paz', hour:'2-digit', hour12:false }).format(new Date());
   return Number(h);
@@ -251,6 +307,10 @@ function normalizeUser(u) {
 }
 
 export default function App() {
+  // --- Supabase sync flags ---
+  const [cloudReady, setCloudReady] = useState(false); // loaded initial snapshot from Supabase
+  const usingCloud = !!supabase; // environment provided
+
   const [products, setProducts] = useState(() => loadLS(LS_KEYS.products, seedProducts));
   const [users, setUsers] = useState(() => {
     const base = loadLS(LS_KEYS.users, seedUsers)
@@ -365,6 +425,27 @@ export default function App() {
   useEffect(() => saveLS(LS_KEYS.numeros, numbers), [numbers]);
   useEffect(() => saveLS(LS_KEYS.teamMessages, teamMessages), [teamMessages]);
 
+  // Migración: convertir IDs legacy de usuarios (ej: 'admin','v1') a UUID para evitar error 22P02 en columnas uuid
+  useEffect(()=>{
+    // Si todos ya parecen UUID, nada que hacer
+    if(!users.some(u=> !isProbablyUUID(u.id))) return;
+    const map = {}; // old -> new
+    const converted = users.map(u=>{
+      if(isProbablyUUID(u.id)) return u;
+      const nu = (crypto?.randomUUID && crypto.randomUUID()) || uid();
+      map[u.id] = nu; return { ...u, id: nu };
+    });
+    setUsers(converted);
+    // Actualizar referencias en ventas y sesión
+    if(Object.keys(map).length){
+      setSales(prev => prev.map(s=> map[s.vendedoraId] ? { ...s, vendedoraId: map[s.vendedoraId] } : s));
+      setSession(prev => prev && map[prev.id] ? { ...prev, id: map[prev.id] } : prev);
+      try { localStorage.setItem('ventas.userIdUuidMigration','1'); } catch{}
+  if(__DBG) console.log('[migracion usuarios->uuid]', map);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users]);
+
   // Auto logout por inactividad (15 minutos) y intento de cerrar pestaña al cerrar sesión
   useEffect(()=>{
     if(!session) return; // solo cuando logueado
@@ -389,10 +470,432 @@ export default function App() {
   // Persist view when changes
   useEffect(()=>{ try { localStorage.setItem('ui.view', view); } catch {} }, [view]);
 
+  // --- Initial pull from Supabase (one-shot) ---
+  useEffect(()=>{
+    if(!usingCloud || cloudReady) return;
+    (async()=>{
+      try {
+        const [p,u,s,dp,tm,num,ds] = await Promise.all([
+          fetchAll('products').catch(()=>[]),
+          fetchAll('users').catch(()=>[]),
+          fetchAll('sales').catch(()=>[]),
+          fetchAll('dispatches').catch(()=>[]),
+          fetchAll('team_messages').catch(()=>[]),
+          fetchAll('numbers').catch(()=>[]),
+          fetchAll('deposit_snapshots').catch(()=>[])
+        ]);
+        if(p.length) setProducts(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          p.forEach(r=>{ map.set(r.id,{ id:r.id, sku:r.sku, nombre:r.nombre, precio:Number(r.precio||0), costo:Number(r.costo||0), stock:Number(r.stock||0), imagenUrl:r.imagen_url, imagenId:r.imagen_id, sintetico:r.sintetico }); });
+          return Array.from(map.values());
+        });
+        if(u.length) setUsers(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          u.forEach(r=>{ map.set(r.id, normalizeUser({ id:r.id, username:r.username, password:r.password, nombre:r.nombre, apellidos:r.apellidos, celular:r.celular, rol:r.rol, grupo:r.grupo, fechaIngreso:r.fecha_ingreso, sueldo:Number(r.sueldo||0), diaPago:r.dia_pago })); });
+          return Array.from(map.values());
+        });
+        if(s.length) setSales(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          s.forEach(r=>{ map.set(r.id,{ id:r.id, fecha:r.fecha, ciudad:r.ciudad, sku:r.sku, cantidad:r.cantidad, precio:Number(r.precio||0), skuExtra:r.sku_extra, cantidadExtra:r.cantidad_extra, total:r.total?Number(r.total):undefined, vendedora:r.vendedora, vendedoraId:r.vendedora_id, metodo:r.metodo, cliente:r.cliente, notas:r.notas, estadoEntrega:r.estado_entrega, gasto:Number(r.gasto||0), gastoCancelacion:Number(r.gasto_cancelacion||0), confirmadoAt:r.confirmado_at, canceladoAt:r.cancelado_at, settledAt:r.settled_at, comprobante:r.comprobante, horaEntrega:r.hora_entrega, destinoEncomienda:r.destino_encomienda, motivo:r.motivo }); });
+          return Array.from(map.values());
+        });
+        if(dp.length) setDispatches(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          dp.forEach(r=>{ map.set(r.id,{ id:r.id, fecha:r.fecha, ciudad:r.ciudad, status:r.status, items:r.items||[] }); });
+          return Array.from(map.values());
+        });
+        if(tm.length) setTeamMessages(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          tm.forEach(r=>{ map.set(r.id,{ id:r.id, grupo:r.grupo, authorId:r.author_id, authorNombre:r.author_nombre, text:r.text, createdAt:r.created_at, readBy:Array.isArray(r.read_by)? r.read_by:[] }); });
+          return Array.from(map.values());
+        });
+        if(num.length) setNumbers(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          num.forEach(r=>{ map.set(r.id,{ id:r.id, sku:r.sku, email:r.email, celular:r.celular, caduca:r.caduca, createdAt:r.created_at }); });
+          return Array.from(map.values());
+        });
+        if(ds.length) setDepositSnapshots(prev=>{
+          const map=new Map(prev.map(x=>[x.id,x]));
+          ds.forEach(r=>{ map.set(r.id,{ id:r.id, city:r.city, timestamp:r.timestamp, rows:r.rows, resumen:r.resumen, depositAmount:r.deposit_amount, depositNote:r.deposit_note, savedAt:r.saved_at }); });
+          return Array.from(map.values());
+        });
+      } catch(err){ console.warn('Supabase initial load error', err); }
+      finally { setCloudReady(true); }
+    })();
+  }, [usingCloud, cloudReady]);
+
+  // Migrar registros locales con ids no-UUID (creados antes de habilitar Supabase) para que puedan insertarse.
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return;
+    const uuidRe=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    // Sales
+    setSales(prev=> prev.some(s=>!uuidRe.test(s.id)) ? prev.map(s=> uuidRe.test(s.id)? s : { ...s, id: uid() }) : prev);
+    // Products (id no se referencia en otras tablas, usamos sku para relaciones)
+    setProducts(prev=> prev.some(p=>!uuidRe.test(p.id)) ? prev.map(p=> uuidRe.test(p.id)? p : { ...p, id: uid() }) : prev);
+    // Dispatches
+    setDispatches(prev=> prev.some(d=>!uuidRe.test(d.id)) ? prev.map(d=> uuidRe.test(d.id)? d : { ...d, id: uid() }) : prev);
+    // Team messages
+    setTeamMessages(prev=> prev.some(m=>!uuidRe.test(m.id)) ? prev.map(m=> uuidRe.test(m.id)? m : { ...m, id: uid() }) : prev);
+    // Numbers
+    setNumbers(prev=> prev.some(n=>!uuidRe.test(n.id)) ? prev.map(n=> uuidRe.test(n.id)? n : { ...n, id: uid() }) : prev);
+    // Deposit snapshots
+    setDepositSnapshots(prev=> prev.some(s=>!uuidRe.test(s.id)) ? prev.map(s=> uuidRe.test(s.id)? s : { ...s, id: uid() }) : prev);
+  }, [usingCloud, cloudReady, setSales, setProducts, setDispatches, setTeamMessages, setNumbers, setDepositSnapshots]);
+
+  // --- Outbound sync (debounced simple) ---
+  const debounceRef = useRef({});
+  const suppressSyncRef = useRef(false); // evita que upserts corran durante reset masivo
+  function debouncedPush(key, fn){
+    clearTimeout(debounceRef.current[key]);
+    debounceRef.current[key] = setTimeout(fn, 800);
+  }
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('products', async()=>{
+    try { await upsert('products', products.map(p=>({ id:p.id, sku:p.sku, nombre:p.nombre, precio:p.precio, costo:p.costo, stock:p.stock, imagen_url:p.imagenUrl||null, imagen_id:p.imagenId||null, sintetico:!!p.sintetico }))); } catch(e){ console.warn('sync products', e); }
+  }); }, [products, usingCloud, cloudReady]);
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('users', async()=>{
+    try {
+      // Deduplicar local por username
+      const seen=new Set();
+      const list = users.filter(u=>{
+        const uname=(u.username||'').trim().toLowerCase();
+        if(!uname) return false; if(seen.has(uname)) return false; seen.add(uname); return true;
+      });
+      if(list.length !== users.length && window._SYNC_DEBUG){ console.warn('[sync users] eliminados duplicados locales', users.length - list.length); }
+      // Usar onConflict=username para que haga UPSERT por username (evita 23505)
+      const sb = supabase; if(!sb) return;
+      const payload = list.map(u=>({ id:u.id, username:u.username, password:u.password, nombre:u.nombre, apellidos:u.apellidos, celular:u.celular, rol:u.rol, grupo:u.grupo, fecha_ingreso:u.fechaIngreso, sueldo:u.sueldo, dia_pago:u.diaPago }));
+      const { error } = await sb.from('users').upsert(payload, { onConflict:'username' });
+      if(error){
+        if(error.code==='23505' && window._SYNC_DEBUG) console.warn('[sync users] conflicto pese a onConflict, intentar reconciliar', error);
+        else if(error) console.warn('sync users', error);
+      }
+    } catch(e){ console.warn('sync users ex', e); }
+  }); }, [users, usingCloud, cloudReady]);
+
+  // Reconciliación de IDs por username (si local y remoto difieren genera 23505 al intentar insertar nuevo id)
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return; // esperar fetch inicial
+    let cancelled=false;
+    (async()=>{
+      try {
+        const sb = supabase; if(!sb) return;
+        const { data, error } = await sb.from('users').select('id,username');
+        if(error || !Array.isArray(data)) return;
+        const remoteMap = new Map(data.map(r=>[(r.username||'').toLowerCase(), r.id]));
+        // Si algún usuario local tiene mismo username pero id distinto -> alinear id local al remoto
+        const needFix = users.filter(u=>{
+          const ru = remoteMap.get((u.username||'').toLowerCase());
+          return ru && ru !== u.id;
+        });
+        if(!needFix.length) return;
+  if(__DBG) console.log('[reconcile users] ajustando ids', needFix.map(u=>u.username));
+        setUsers(prev => prev.map(u=>{
+          const ru = remoteMap.get((u.username||'').toLowerCase());
+          return ru && ru!==u.id ? { ...u, id: ru } : u;
+        }));
+        setSession(prev => { if(!prev) return prev; const ru = remoteMap.get((prev.username||'').toLowerCase()); return ru && ru!==prev.id ? { ...prev, id: ru } : prev; });
+        setSales(prev => prev.map(s=>{
+          if(!s.vendedoraId) return s;
+            const matchUser = users.find(u=>u.id===s.vendedoraId);
+            if(matchUser){
+              const ru = remoteMap.get((matchUser.username||'').toLowerCase());
+              return ru && ru!==s.vendedoraId ? { ...s, vendedoraId: ru } : s;
+            }
+          return s;
+        }));
+      } catch(e){ if(window._SYNC_DEBUG) console.warn('[reconcile users] ex', e); }
+    })();
+    return ()=>{ cancelled=true; };
+  }, [usingCloud, cloudReady, users]);
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('sales', async()=>{
+    try {
+      const rows = sales.map(s=>{
+        const precioNum = Number(s.precio);
+        const cantidadNum = Number(s.cantidad);
+        const row = {
+          id: s.id,
+          fecha: s.fecha || todayISO(),
+            ciudad: s.ciudad || 'SIN CIUDAD',
+            sku: s.sku || null,
+            cantidad: (isNaN(cantidadNum) || cantidadNum<=0) ? 1 : cantidadNum,
+            precio: isNaN(precioNum) ? 0 : precioNum,
+            sku_extra: s.skuExtra || null,
+            cantidad_extra: s.cantidadExtra!=null ? Number(s.cantidadExtra)||0 : 0,
+            total: (s.total!=null && !isNaN(Number(s.total))) ? Number(s.total) : null,
+            vendedora: s.vendedora || null,
+            vendedora_id: (s.vendedoraId && isProbablyUUID(s.vendedoraId)) ? s.vendedoraId : null,
+            metodo: s.metodo || null,
+            cliente: s.cliente || null,
+            notas: s.notas || null,
+            estado_entrega: s.estadoEntrega || 'confirmado',
+            gasto: s.gasto!=null ? Number(s.gasto)||0 : 0,
+            gasto_cancelacion: s.gastoCancelacion!=null ? Number(s.gastoCancelacion)||0 : 0,
+            confirmado_at: s.confirmadoAt || null,
+            cancelado_at: s.canceladoAt || null,
+            settled_at: s.settledAt || null,
+            comprobante: s.comprobante || null,
+            hora_entrega: s.horaEntrega || null,
+            destino_encomienda: s.destinoEncomienda || null,
+            motivo: s.motivo || null
+        };
+        return row;
+      });
+      // Detectar filas problemáticas (precio null/improper)
+      const bad = rows.filter(r=> r.precio==null || isNaN(Number(r.precio)));
+      if(bad.length){ console.warn('Filas con precio inválido normalizadas a 0', bad.map(b=>b.id)); }
+      await upsert('sales', rows);
+      window._lastSalesPushError = null;
+  if(__DBG){ console.log('[SYNC sales] upsert ok', rows.length); }
+    } catch(e){ console.warn('sync sales', e); window._lastSalesPushError = e; }
+  }); }, [sales, usingCloud, cloudReady]);
+
+  // Helpers de diagnóstico global
+  useEffect(()=>{
+    if(!usingCloud) return;
+    // Mostrar URL del proyecto para comparar entre dispositivos
+  try { if(__DBG && supabase) console.log('[DEBUG] Supabase URL', supabase?.restUrl||supabase?.url||''); } catch{}
+    // Función para forzar push inmediato de ventas
+    window._forcePushSales = async ()=>{
+      if(!suppressSyncRef?.current){ /* noop guard */ }
+      try {
+        const sb = supabase; if(!sb) return console.warn('no supabase');
+        const rows = sales.map(s=>({ id:s.id, fecha:s.fecha||todayISO(), ciudad:s.ciudad||'SIN CIUDAD', sku:s.sku||null, cantidad:Number(s.cantidad||0)||1, precio:Number(s.precio||0)||0, sku_extra:s.skuExtra||null, cantidad_extra:Number(s.cantidadExtra||0)||0, total:(s.total!=null && !isNaN(Number(s.total)))?Number(s.total):null, vendedora:s.vendedora||null, vendedora_id:(s.vendedoraId && isProbablyUUID(s.vendedoraId))? s.vendedoraId : null, metodo:s.metodo||null, cliente:s.cliente||null, notas:s.notas||null, estado_entrega:s.estadoEntrega||'confirmado', gasto:Number(s.gasto||0)||0, gasto_cancelacion:Number(s.gastoCancelacion||0)||0, confirmado_at:s.confirmadoAt||null, cancelado_at:s.canceladoAt||null, settled_at:s.settledAt||null, comprobante:s.comprobante||null, hora_entrega:s.horaEntrega||null, destino_encomienda:s.destinoEncomienda||null, motivo:s.motivo||null }));
+        const { error } = await sb.from('sales').upsert(rows);
+        if(error){
+          console.warn('[DEBUG forcePushSales] batch error, intentando fila por fila', error);
+          // fallback fila por fila para identificar cuál rompe
+          for(const r of rows){
+            const { error: eRow } = await sb.from('sales').upsert([r]);
+            if(eRow){
+              window._lastSalesPushErrorDetail = { id:r.id, error: eRow.message||String(eRow) };
+              console.warn('[DEBUG forcePushSales] fallo fila', r.id, eRow);
+              break;
+            }
+          }
+        } else {
+          window._lastSalesPushErrorDetail = null;
+        }
+        console.log('[DEBUG forcePushSales] filas', rows.length, error||'OK');
+      } catch(e){ console.warn('[DEBUG forcePushSales] ex', e); window._lastSalesPushErrorDetail = { exception: e.message||String(e) }; }
+    };
+    // Pull manual top 5
+    window._pullHeadSales = async ()=>{
+      try { const { data, error } = await supabase.from('sales').select('id,fecha,ciudad,updated_at').order('updated_at',{ascending:false}).limit(5); console.log('[DEBUG head sales]', data||[], error||''); return data; } catch(e){ console.warn('[DEBUG head sales] ex', e); }
+    };
+    // Obtener solo IDs locales para comparar
+    window._localSalesIds = ()=> sales.map(s=>s.id);
+  }, [usingCloud, cloudReady, sales]);
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('dispatches', async()=>{
+    try { await upsert('dispatches', dispatches.map(d=>({ id:d.id, fecha:d.fecha, ciudad:d.ciudad, status:d.status, items:d.items })) ); } catch(e){ console.warn('sync dispatches', e); }
+  }); }, [dispatches, usingCloud, cloudReady]);
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('team_messages', async()=>{
+    try { await upsert('team_messages', teamMessages.map(m=>({ id:m.id, grupo:m.grupo, author_id:m.authorId, author_nombre:m.authorNombre, text:m.text, created_at:m.createdAt, read_by:m.readBy })) ); } catch(e){ console.warn('sync team messages', e); }
+  }); }, [teamMessages, usingCloud, cloudReady]);
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('numbers', async()=>{
+    try { await upsert('numbers', numbers.map(n=>({ id:n.id, sku:n.sku, email:n.email, celular:n.celular, caduca:n.caduca, created_at:n.createdAt })) ); } catch(e){ console.warn('sync numbers', e); }
+  }); }, [numbers, usingCloud, cloudReady]);
+  useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('deposit_snapshots', async()=>{
+    try { await upsert('deposit_snapshots', depositSnapshots.map(d=>({ id:d.id, city:d.city, timestamp:d.timestamp, rows:d.rows, resumen:d.resumen, deposit_amount:d.depositAmount, deposit_note:d.depositNote, saved_at:d.savedAt })) ); } catch(e){ console.warn('sync deposit_snapshots', e); }
+  }); }, [depositSnapshots, usingCloud, cloudReady]);
+
+  // Poll de ventas (cada 5s) siempre trae top 200 y fusiona (evita perder filas por reloj o filtros gte)
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return; let stop=false;
+    async function pull(){
+      if(stop) return;
+      try {
+        const sb = supabase; if(!sb) return;
+        const { data, error } = await sb.from('sales').select('*').order('updated_at',{ascending:false}).limit(200);
+        if(!error && Array.isArray(data)){
+          setSales(prev=>{
+            const before = prev.length;
+            const map=new Map(prev.map(x=>[x.id,x]));
+            data.forEach(r=> map.set(r.id,{...map.get(r.id), ...r}));
+            const merged = Array.from(map.values());
+            if(window._SYNC_DEBUG){
+              const newOnes = data.filter(r=> !prev.find(p=>p.id===r.id)).map(r=>r.id.slice(-6));
+              if(newOnes.length) console.log('[SYNC sales poll] nuevos', newOnes);
+              else console.log('[SYNC sales poll] sin cambios (prev='+before+')');
+            }
+            return merged;
+          });
+        } else if(error && window._SYNC_DEBUG){ console.warn('[SYNC sales poll] error', error); }
+      } catch(e){ if(window._SYNC_DEBUG) console.warn('[SYNC sales poll] ex', e); }
+      finally { if(!stop) setTimeout(pull, 5000); }
+    }
+    pull();
+    return ()=>{ stop=true; };
+  }, [usingCloud, cloudReady]);
+
+  // Realtime sales (INSERT/UPDATE) para acelerar reflejo y cubrir direccionalidad móvil->PC
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return;
+    const sb = supabase; if(!sb) return;
+    const channel = sb.channel('sales_changes')
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'sales' }, payload => {
+        const r = payload.new; if(!r) return;
+        setSales(prev=>{
+          if(prev.find(s=>s.id===r.id)) return prev; // ya está (poll o propio push)
+          if(__DBG) console.log('[RT sales] insert', r.id.slice(-6));
+          const mapped = { id:r.id, fecha:r.fecha, ciudad:r.ciudad, sku:r.sku, cantidad:r.cantidad, precio:Number(r.precio||0), skuExtra:r.sku_extra, cantidadExtra:r.cantidad_extra, total:r.total?Number(r.total):undefined, vendedora:r.vendedora, vendedoraId:r.vendedora_id, metodo:r.metodo, cliente:r.cliente, notas:r.notas, estadoEntrega:r.estado_entrega, gasto:Number(r.gasto||0), gastoCancelacion:Number(r.gasto_cancelacion||0), confirmadoAt:r.confirmado_at, canceladoAt:r.cancelado_at, settledAt:r.settled_at, comprobante:r.comprobante, horaEntrega:r.hora_entrega, destinoEncomienda:r.destino_encomienda, motivo:r.motivo };
+          return [mapped, ...prev];
+        });
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'sales' }, payload => {
+        const r = payload.new; if(!r) return;
+        setSales(prev=> prev.map(s=> s.id===r.id ? { ...s, ciudad:r.ciudad, sku:r.sku, cantidad:r.cantidad, precio:Number(r.precio||0), skuExtra:r.sku_extra, cantidadExtra:r.cantidad_extra, total:r.total?Number(r.total):undefined, vendedora:r.vendedora, vendedoraId:r.vendedora_id, metodo:r.metodo, cliente:r.cliente, notas:r.notas, estadoEntrega:r.estado_entrega, gasto:Number(r.gasto||0), gastoCancelacion:Number(r.gasto_cancelacion||0), confirmadoAt:r.confirmado_at, canceladoAt:r.cancelado_at, settledAt:r.settled_at, comprobante:r.comprobante, horaEntrega:r.hora_entrega, destinoEncomienda:r.destino_encomienda, motivo:r.motivo } : s));
+  if(__DBG) console.log('[RT sales] update', r.id.slice(-6));
+      })
+      .subscribe();
+    return ()=>{ try { supabase.removeChannel(channel); } catch{} };
+  }, [usingCloud, cloudReady]);
+
+  // Re-migrar (id no UUID) ventas rezagadas creadas en navegadores sin crypto.randomUUID antes del cambio de uid()
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return;
+    const uuidRe=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    setSales(prev => prev.some(s=> !uuidRe.test(s.id)) ? prev.map(s=> uuidRe.test(s.id)? s : { ...s, id: uid() }) : prev);
+  }, [usingCloud, cloudReady]);
+
+  // Instrumentación para saber por qué se salta un push de ventas
+  useEffect(()=>{
+    if(!usingCloud) return;
+    if(!window._SYNC_DEBUG) return; // activar con window._SYNC_DEBUG=true en consola
+  if(suppressSyncRef.current && __DBG) console.log('[SYNC sales] skip: suppressSyncRef');
+  else if(!suppressSyncRef.current && !cloudReady && __DBG) console.log('[SYNC sales] skip: !cloudReady');
+  }, [sales, usingCloud, cloudReady]);
+
+  // ---- Reset total (debe vivir aquí para acceder a suppressSyncRef) ----
+  const [lastResetInfo, setLastResetInfo] = useState(null); // {before, after, ts}
+  async function handleResetAll(){
+    if(!session || session.rol!== 'admin') { alert('Solo admin'); return; }
+    if(!window.confirm('¿Borrar absolutamente TODA la información (ventas, historial, productos, despachos, mensajes, números, snapshots) tanto local como en la nube? Esta acción no se puede deshacer.')) return;
+    suppressSyncRef.current = true;
+    // Cancelar timers de sync ya programados para evitar re-upsert después del borrado
+    try { Object.values(debounceRef.current).forEach(id=> clearTimeout(id)); } catch{}
+    try {
+  if(usingCloud){
+        try {
+          // Contar filas antes (diagnóstico)
+          const before = {};
+          const tables = ['sales','dispatches','team_messages','numbers','deposit_snapshots','products','users'];
+          const sb = supabase;
+          await Promise.all(tables.map(async t=>{ try { before[t] = (await fetchAll(t)).length; } catch { before[t] = 'err'; } }));
+          console.log('RESET antes (conteos):', before);
+          // Borrar dependientes primero
+          await Promise.all([
+            clearTable('sales'),
+            clearTable('dispatches'),
+            clearTable('team_messages'),
+            clearTable('numbers'),
+            clearTable('deposit_snapshots')
+          ]);
+          // Borrar productos y usuarios no-admin (separado para preservar al menos un admin)
+          try { await clearTable('products'); } catch(e){ console.warn('clear products', e); }
+          try { const sb = supabase; if(sb) { await sb.from('users').delete().neq('rol','admin'); } } catch(e){ console.warn('clear non-admin users', e); }
+          // Insertar marca de reset global
+          try { const sb = supabase; if(sb) await sb.from('resets').insert({}); } catch(e){ console.warn('insert reset marker', e); }
+          // Contar después
+            const after = {};
+            await Promise.all(tables.map(async t=>{ try { after[t] = (await fetchAll(t)).length; } catch { after[t] = 'err'; } }));
+            // Si todavía quedan filas inesperadas (excepto users admin), intentar segunda pasada rápida
+            const leftover = Object.entries(after).filter(([tbl,count])=> typeof count==='number' && count>0 && !(tbl==='users' && count<=2));
+            if(leftover.length){
+              console.warn('[RESET] Quedan filas tras primer borrado, reintentando', leftover);
+              try {
+                await Promise.all([
+                  clearTable('sales').catch(()=>{}),
+                  clearTable('dispatches').catch(()=>{}),
+                  clearTable('team_messages').catch(()=>{}),
+                  clearTable('numbers').catch(()=>{}),
+                  clearTable('deposit_snapshots').catch(()=>{}),
+                  clearTable('products').catch(()=>{})
+                ]);
+                try { if(sb) await sb.from('users').delete().neq('rol','admin'); } catch{}
+              } catch(e){ console.warn('[RESET] error reintento', e); }
+              // Recontar
+              await Promise.all(tables.map(async t=>{ try { after[t] = (await fetchAll(t)).length; } catch { } }));
+            }
+            console.log('RESET después (conteos):', after);
+            setLastResetInfo({ before, after, ts: new Date().toISOString() });
+            try { window._lastResetDiag = { before, after, ts: Date.now() }; localStorage.setItem('ventas.lastResetDiag', JSON.stringify(window._lastResetDiag)); } catch{}
+        } catch(e){ console.warn('Cloud clear failed', e); }
+      }
+      setSales([]);
+      setProducts([]);
+      setUsers(prev=> prev.filter(u=> u.rol==='admin'));
+      setDispatches([]);
+      setNumbers([]);
+      setTeamMessages([]);
+      setDepositSnapshots([]);
+      try {
+        const prefix='ventas.'; const keep=new Set(['ventas.session']); const keys=[];
+        for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith(prefix) && !keep.has(k)) keys.push(k); }
+        keys.forEach(k=> localStorage.removeItem(k));
+        localStorage.removeItem('ui.view');
+        localStorage.removeItem('ui.cityFilter');
+      } catch{}
+      alert('Datos borrados local + nube (ver consola para detalles).');
+      setView('dashboard');
+    } catch(e){ console.error(e); alert('Error al borrar datos'); }
+  finally { setTimeout(()=>{ suppressSyncRef.current = false; }, 3000); }
+  }
+
+  // Detección de resets por Realtime (instantáneo) con fallback polling cada 2s (reactivado)
+  useEffect(()=>{
+    if(!usingCloud) return;
+    const sb = supabase; if(!sb) return;
+    let disposed=false; let lastSeen=null; const cleanupFns=[]; let missing=false;
+    const LS_RESET_KEY='ventas.resets.lastSeen';
+    try { const stored=localStorage.getItem(LS_RESET_KEY); if(stored) lastSeen=stored; } catch{}
+    async function init(){
+      try {
+        const { error, data } = await sb.from('resets').select('created_at').order('created_at',{ascending:false}).limit(1);
+        if(error){
+          const msg=(error.message||'').toLowerCase();
+          if(msg.includes('not found')||msg.includes('does not exist')||error.code==='42P01'||error.status===404){
+            missing=true; if(window._SYNC_DEBUG) console.warn('[resets] tabla no existe.'); return;
+          }
+          if(window._SYNC_DEBUG) console.warn('[resets] error inicial', error);
+        } else {
+          const remoteTs = data && data[0]?.created_at;
+          // Si ya lo vimos (persistido), establecer lastSeen para no disparar reset en este reload
+          if(remoteTs && remoteTs===lastSeen && __DBG) console.log('[resets] último reset ya procesado previamente');
+          if(remoteTs && !lastSeen){ // primera vez sin registro local -> marcarlo como visto pero NO limpiar local automáticamente
+            lastSeen = remoteTs;
+            try { localStorage.setItem(LS_RESET_KEY, remoteTs); } catch{}
+            if(__DBG) console.log('[resets] marcando reset histórico como visto (no se borra local).');
+          }
+        }
+      } catch(e){ if(window._SYNC_DEBUG) console.warn('[resets] excepción inicial', e); return; }
+      if(disposed || missing) return; start();
+    }
+    function applyRemoteReset(ts){
+      if(disposed) return; if(ts && ts===lastSeen) return; lastSeen=ts; try { localStorage.setItem(LS_RESET_KEY, ts||''); } catch{}
+      suppressSyncRef.current=true;
+      setSales([]); setProducts([]); setDispatches([]); setNumbers([]); setTeamMessages([]); setDepositSnapshots([]); setUsers(prev=>prev.filter(u=>u.rol==='admin'));
+      try { const prefix='ventas.'; const keep=new Set(['ventas.session','ventas.resets.lastSeen']); const rm=[]; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(k&&k.startsWith(prefix)&&!keep.has(k)) rm.push(k);} rm.forEach(k=> localStorage.removeItem(k)); } catch{}
+  setTimeout(()=>{ if(!disposed) suppressSyncRef.current=false; },2500);
+      alert('Borrado global detectado (otro dispositivo).');
+    }
+    function start(){
+      const channel = sb.channel('resets_broadcast')
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'resets' }, payload=>{ const ts=payload.new?.created_at; applyRemoteReset(ts); })
+        .subscribe();
+      let pollTimer; async function poll(){ if(disposed) return; try { const { data } = await sb.from('resets').select('created_at').order('created_at',{ascending:false}).limit(1); const ts=data&&data[0]?.created_at; if(ts && ts!==lastSeen) applyRemoteReset(ts); } catch(e){ } finally { if(!disposed) pollTimer=setTimeout(poll,2000); } }
+      poll();
+      cleanupFns.push(()=>{ try{ if(pollTimer) clearTimeout(pollTimer);}catch{}; try{ sb.removeChannel(channel);}catch{} });
+    }
+    init();
+    return ()=>{ disposed=true; cleanupFns.forEach(f=>f()); };
+  }, [usingCloud]);
+
+
   if (!session) return <Auth onLogin={(s)=>{ setSession(s); navigate('dashboard'); }} users={users} products={products} />;
 
   return (
   <div className="min-h-screen bg-[#121f27] text-neutral-100 flex">
+  {/* DebugOverlay removido para producción */}
   <Sidebar session={session} onLogout={() => { try { localStorage.removeItem(LS_KEYS.session); } catch{}; setSession(null); setView('dashboard'); }} view={view} setView={navigate} />
       {/* Barra de navegación histórica (atrás / adelante) */}
       <AnimatePresence>
@@ -470,6 +973,8 @@ export default function App() {
           setTeamMessages={setTeamMessages}
           setDepositSnapshots={setDepositSnapshots}
           setView={setView}
+          onResetAll={handleResetAll}
+          lastResetInfo={lastResetInfo}
         />
       )}
       {view === 'mis-numeros' && (
@@ -538,6 +1043,75 @@ export default function App() {
   );
 }
 
+// ---- Debug Overlay (sin consola móvil) ----
+function DebugOverlay({ sales, session }){
+  const [remoteHead, setRemoteHead] = useState([]); // top 3
+  const [loading, setLoading] = useState(false);
+  const [lastFetched, setLastFetched] = useState(null);
+  const [pushStatus, setPushStatus] = useState('');
+  const [forceStatus, setForceStatus] = useState('');
+  useEffect(()=>{
+    let stop=false;
+    async function loop(){
+      if(stop) return;
+      try {
+        setLoading(true);
+        const { data, error } = await supabase.from('sales').select('id,precio,updated_at').order('updated_at',{ascending:false}).limit(3);
+        if(!stop){ if(!error && Array.isArray(data)) setRemoteHead(data); setLastFetched(new Date().toLocaleTimeString()); }
+      } catch(e){ /* ignore */ }
+      finally { setLoading(false); if(!stop) setTimeout(loop, 5000); }
+    }
+    if(window._SYNC_DEBUG) loop();
+    return ()=>{ stop=true; };
+  }, []);
+  const localHead = sales.slice(0,3).map(s=>({ id:s.id, precio:s.precio }));
+  async function pushTest(){
+    try {
+      setPushStatus('enviando...');
+  let vId = session? session.id : null;
+  if(vId && !isProbablyUUID(vId)) vId = null; // no mandamos IDs legacy
+  const test = { id: uid(), fecha: todayISO(), ciudad:'TEST', sku:null, cantidad:1, precio: 4321, vendedora: session? session.nombre: 'N/A', vendedoraId: vId, metodo:'Efectivo', cliente:'Debug', notas:'debug' };
+      // Insert directo sin pasar por estado para diferenciar si llega (no depende del debounce)
+      const { error } = await supabase.from('sales').upsert([{ id:test.id, fecha:test.fecha, ciudad:test.ciudad, sku:test.sku, cantidad:test.cantidad, precio:test.precio, vendedora:test.vendedora, vendedora_id:test.vendedoraId, metodo:test.metodo, cliente:test.cliente, notas:test.notas, estado_entrega:'confirmado' }]);
+      if(error) setPushStatus('error '+error.message);
+      else { setPushStatus('OK '+test.id.slice(-6)); }
+    } catch(e){ setPushStatus('excepcion '+e.message); }
+  }
+  return (
+    <div style={{ position:'fixed', top:8, right:8, zIndex:5000, width:260 }} className="text-[10px] bg-[#0d141a]/90 border border-[#1f2d36] rounded-xl p-3 space-y-2 shadow-lg">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-[#e7922b]">DEBUG</span>
+        <button onClick={()=>{ window.toggleSyncDebug(false); location.reload(); }} className="text-[9px] px-2 py-0.5 bg-neutral-700 rounded">X</button>
+      </div>
+      <div className="space-y-1">
+        <div>Local ventas: <span className="text-neutral-200 font-semibold">{sales.length}</span></div>
+        <div>Local top: {localHead.map(h=> h.id.slice(-4)+'/'+h.precio).join(', ') || '—'}</div>
+        <div>Remote top: {remoteHead.map(h=> h.id.slice(-4)+'/'+h.precio).join(', ') || (loading? 'cargando...' : '—')}</div>
+        <div>Última consulta: {lastFetched||'—'}</div>
+        <div>Push err: {window._lastSalesPushError? String(window._lastSalesPushError.message||window._lastSalesPushError): 'null'}</div>
+        {window._lastResetDiag && (
+          <div className="mt-1 border border-neutral-700 rounded p-1 text-[8px] max-h-28 overflow-auto">
+            <div className="text-neutral-400 mb-0.5">ResetDiag:</div>
+            {Object.entries(window._lastResetDiag.after||{}).map(([k,v])=> <div key={k}>{k}:{v}</div>)}
+          </div>
+        )}
+      </div>
+      <div className="space-y-1">
+        <button onClick={pushTest} className="w-full bg-[#e7922b] text-[#1a2430] font-semibold rounded py-1 text-[10px]">Venta test 4321</button>
+        <div className="text-[9px] text-neutral-400">Estado: {pushStatus||'—'}</div>
+        <button onClick={async()=>{ setForceStatus('forzando...'); try { await window._forcePushSales(); setForceStatus('OK'); } catch(e){ setForceStatus('error'); } }} className="w-full bg-neutral-700 hover:bg-neutral-600 text-neutral-200 font-semibold rounded py-1 text-[10px]">Force Push Ventas</button>
+        <div className="text-[9px] text-neutral-400">Force: {forceStatus||'—'}</div>
+      </div>
+      {window._lastSalesPushErrorDetail && (
+        <div className="text-[8px] text-red-400 break-words max-h-24 overflow-auto border border-red-500/30 rounded p-1">
+          Err fila: {window._lastSalesPushErrorDetail.id? String(window._lastSalesPushErrorDetail.id).slice(-6):''} {window._lastSalesPushErrorDetail.error||window._lastSalesPushErrorDetail.exception}
+        </div>
+      )}
+      <div className="text-[8px] text-neutral-500">Se oculta quitando ?debug o usando toggleSyncDebug(false)</div>
+    </div>
+  );
+}
+
 // ---------------------- Frases Motivacionales ----------------------
 function FrasesView(){
   const frases = FRASES_MOTIVACION;
@@ -558,7 +1132,7 @@ function FrasesView(){
 }
 
 // ---------------------- Configuración (cambiar contraseña) ----------------------
-function ConfigView({ session, users, setUsers, setSession, setProducts, setSales, setDispatches, setNumbers, setTeamMessages, setDepositSnapshots, setView }) {
+function ConfigView({ session, users, setUsers, setSession, setProducts, setSales, setDispatches, setNumbers, setTeamMessages, setDepositSnapshots, setView, onResetAll, lastResetInfo }) {
   const [actual, setActual] = useState('');
   const [nueva, setNueva] = useState('');
   const [repite, setRepite] = useState('');
@@ -580,38 +1154,6 @@ function ConfigView({ session, users, setUsers, setSession, setProducts, setSale
     setMsg('Contraseña actualizada');
   }
 
-  function resetAll(){
-    if(!session || session.rol!== 'admin') { alert('Solo admin'); return; }
-    if(!window.confirm('¿Borrar absolutamente TODA la información (ventas, historial, productos, despachos, mensajes, números, snapshots)? Esta acción no se puede deshacer.')) return;
-    try {
-      // Limpiar estados (mantener al menos admin y seed básico vacío)
-      setSales([]);
-      setProducts([]);
-      // Mantener solo admin
-      setUsers(prev=> prev.filter(u=> u.rol==='admin'));
-      setDispatches([]);
-      setNumbers([]);
-      setTeamMessages([]);
-      setDepositSnapshots([]);
-      // Limpiar claves LS relevantes
-      const prefix = 'ventas.';
-      const keep = new Set(['ventas.session']);
-      const toRemove = [];
-      for(let i=0;i<localStorage.length;i++){
-        const k = localStorage.key(i);
-        if(!k) continue;
-        if(k.startsWith(prefix) && !keep.has(k)) toRemove.push(k);
-      }
-      toRemove.forEach(k=> localStorage.removeItem(k));
-      // También filtros UI
-      localStorage.removeItem('ui.view');
-      localStorage.removeItem('ui.cityFilter');
-      // Mantener sesión actual (admin) para seguir dentro; si se desea cerrar: descomentar siguiente línea
-      // setSession(null);
-      alert('Datos borrados. El sistema está limpio.');
-      setView('dashboard');
-    } catch(e){ console.error(e); alert('Error al borrar datos'); }
-  }
 
   return (
     <div className="flex-1 p-6 bg-[#121f27] overflow-auto">
@@ -643,9 +1185,43 @@ function ConfigView({ session, users, setUsers, setSession, setProducts, setSale
           <div className="mt-8 border-t border-neutral-800 pt-6 space-y-3">
             <h3 className="text-sm font-semibold text-[#e7922b]">Reset total</h3>
             <p className="text-[11px] text-neutral-400 leading-relaxed">Elimina absolutamente todas las ventas, historial, productos, despachos, números, mensajes y snapshots de depósito de este navegador, dejando solo el usuario administrador activo.</p>
-            <button onClick={resetAll} className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-sm w-full">Borrar todo (Irreversible)</button>
+            <ResetAllButton session={session} onResetAll={onResetAll} />
+            {lastResetInfo && (
+              <div className="mt-3 p-3 rounded-lg bg-neutral-900 border border-neutral-700 text-[10px] leading-relaxed space-y-1">
+                <div className="text-neutral-400">Último reset: <span className="text-neutral-200">{new Date(lastResetInfo.ts).toLocaleString()}</span></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <div className="font-semibold text-neutral-300 mb-1">Antes</div>
+                    {Object.entries(lastResetInfo.before).map(([k,v])=> <div key={k}>{k}: <span className="text-neutral-200">{String(v)}</span></div>)}
+                  </div>
+                  <div>
+                    <div className="font-semibold text-neutral-300 mb-1">Después</div>
+                    {Object.entries(lastResetInfo.after).map(([k,v])=> <div key={k}>{k}: <span className="text-neutral-200">{String(v)}</span></div>)}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ResetAllButton({ session, onResetAll }){
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  if(!session || session.rol!=='admin') return null;
+  if(!open){
+    return <button onClick={()=>setOpen(true)} className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-sm w-full">Borrar todo (Irreversible)</button>;
+  }
+  return (
+    <div className="p-3 rounded-xl bg-red-900/20 border border-red-700 space-y-2">
+      <div className="text-[11px] leading-relaxed text-red-300">Escribe BORRAR TODO y presiona Confirmar. Esto eliminará datos locales y en la nube excepto el admin.</div>
+      <input autoFocus value={text} onChange={e=>setText(e.target.value.toUpperCase())} placeholder="BORRAR TODO" className="w-full bg-red-950/40 border border-red-700 rounded-lg px-3 py-2 text-sm tracking-wide" />
+      <div className="flex gap-2">
+        <button onClick={()=>{ setOpen(false); setText(''); }} className="flex-1 px-3 py-2 rounded-lg bg-neutral-700 text-sm">Cancelar</button>
+        <button disabled={text!=='BORRAR TODO'} onClick={()=>{ if(text==='BORRAR TODO'){ setOpen(false); setText(''); onResetAll(); } }} className="flex-1 px-3 py-2 rounded-lg bg-red-600 disabled:opacity-40 text-sm font-semibold">Confirmar</button>
       </div>
     </div>
   );
@@ -671,71 +1247,31 @@ function Auth({ onLogin, users }) {
 }
 
 // ---------------------- Forms ----------------------
-function LoginForm({ users, onLogin }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState("");
+// DebugOverlay removido
 
-  function submit(e) {
-    e.preventDefault();
-  const u = users.find((x) => x.username === email && x.password === password);
-  if (!u) return setErr("Credenciales incorrectas");
-  onLogin({ id: u.id, nombre: `${u.nombre} ${u.apellidos}`.trim(), username: u.username, rol: u.rol, productos: u.productos || [], grupo: u.grupo||'' });
-  }
-
+function Sidebar({ session, onLogout, view, setView }){
   return (
-  <form onSubmit={submit} className="space-y-3">
-  <div>
-    <label className="text-sm">Usuario</label>
-  <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#3a4750] rounded-xl px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-[#ea9216]" placeholder="usuario" />
-      </div>
-      <div>
-        <label className="text-sm">Contraseña</label>
-  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#3a4750] rounded-xl px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-[#ea9216]" placeholder="••••••••" />
-      </div>
-      {err && <div className="text-red-400 text-sm">{err}</div>}
-  <button className="w-full btn-primary mt-2">Entrar</button>
-    </form>
-  );
-}
-
-// (Formulario de registro eliminado del flujo público)
-
-// ---------------------- Sidebar ----------------------
-function Sidebar({ session, onLogout, view, setView }) {
-  return (
-  <aside className="w-full md:w-[250px] lg:w-[280px] bg-[#273947] border-r border-[#0f171e] p-4 flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-  <div className="w-10 h-10 rounded-2xl bg-[#ea9216] grid place-items-center text-[#313841] font-black">M</div>
-  <div>
-          <div className="font-semibold leading-tight">Maya Ventas</div>
-          <div className="text-xs text-neutral-400">{session.nombre}</div>
-        </div>
-      </div>
-      <nav className="text-sm flex-1">
-        <button onClick={() => setView('dashboard')} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'dashboard' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><TrendingUp className={"w-4 h-4 "+(view==='dashboard'? 'text-[#273947]' : 'text-white')} /> Dashboard</button>
-  {session.rol === 'admin' && (
-  <button onClick={() => setView('historial')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'historial' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><History className={"w-4 h-4 "+(view==='historial'? 'text-[#273947]' : 'text-white')} /> Historial</button>
-  )}
-        <button onClick={() => setView('ventas')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'ventas' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><CircleDollarSign className={"w-4 h-4 "+(view==='ventas'? 'text-[#273947]' : 'text-white')} /> VENTAS</button>
+    <aside className="w-60 bg-[#0f171e] border-r border-neutral-800 p-3 flex flex-col">
+      <div className="text-lg font-semibold mb-4 px-2">Maya</div>
+      <nav className="flex-1 overflow-auto pr-1">
+        <button onClick={() => setView('dashboard')} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition "+ (view === 'dashboard' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Home className={"w-4 h-4 "+(view==='dashboard'? 'text-[#273947]' : 'text-white')} /> Dashboard</button>
+        {session.rol==='admin' && <button onClick={() => setView('historial')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'historial' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><History className={"w-4 h-4 "+(view==='historial'? 'text-[#273947]' : 'text-white')} /> Historial</button>}
+        <button onClick={() => setView('ventas')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'ventas' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><CircleDollarSign className={"w-4 h-4 "+(view==='ventas'? 'text-[#273947]' : 'text-white')} /> Ventas</button>
         {session.rol === 'admin' && (
           <button onClick={() => setView('almacen')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'almacen' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='almacen'? 'text-[#273947]' : 'text-white')} /> Despacho de Productos</button>
         )}
         {session.rol === 'admin' && (
-          <>
-            <button onClick={() => setView('create-user')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'create-user' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><UserPlus className={"w-4 h-4 "+(view==='create-user'? 'text-[#273947]' : 'text-white')} /> Usuarios</button>
-          </>
+          <button onClick={() => setView('create-user')} className={"mt-1 w-full text-left flex items-center gap-2 p-2 rounded-xl transition " + (view === 'create-user' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><UserPlus className={"w-4 h-4 "+(view==='create-user'? 'text-[#273947]' : 'text-white')} /> Usuarios</button>
         )}
         <button onClick={() => setView('register-sale')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition " + (view === 'register-sale' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><ShoppingCart className={"w-4 h-4 "+(view==='register-sale'? 'text-[#273947]' : 'text-white')} /> Registrar venta</button>
         {session.rol === 'admin' && (
           <button onClick={() => setView('products')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition " + (view === 'products' ? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='products'? 'text-[#273947]' : 'text-white')} /> Productos</button>
         )}
         {session.rol === 'admin' && <div className="flex items-center gap-2 p-2 rounded-xl hover:bg-neutral-800/60 mt-1 cursor-pointer" onClick={()=>setView('mis-numeros')}><Wallet className="w-4 h-4" /> {view==='mis-numeros' ? <span className="font-semibold text-[#ea9216]">Mis Números</span> : 'Mis Números'}</div>}
-  {/* Botón 'Frases motivacionales' ocultado a solicitud */}
         <button onClick={()=>setView('config')} className={"flex items-center gap-2 p-2 rounded-xl w-full text-left mt-1 transition "+(view==='config'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Settings className={"w-4 h-4 "+(view==='config'? 'text-[#273947]' : 'text-white')} /> Configuración</button>
       </nav>
-      <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm">
-        <LogOut className="w-4 h-4" /> Cerrar Sesion
+      <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm mt-2">
+        <LogOut className="w-4 h-4" /> Cerrar sesión
       </button>
     </aside>
   );
@@ -1645,6 +2181,10 @@ function ProductsView({ products, setProducts, session }) {
   }
   function remove(p) {
     if (!confirm('¿Eliminar producto ' + p.sku + '?')) return;
+    // Intentar borrar imagen en Cloudinary si existe
+    if(p.imagenId){
+      import('./cloudinary.js').then(m=> m.deleteProductImage?.(p.imagenId));
+    }
     setProducts(products.filter(x => x.sku !== p.sku));
     if (editingSku === p.sku) resetForm();
   }
@@ -1973,7 +2513,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                   return (
                     <div key={p.sku} className="flex items-center gap-3 px-3 py-2 text-xs">
                       <div className="w-10 h-10 rounded-md bg-neutral-800 flex items-center justify-center overflow-hidden border border-neutral-700 shrink-0">
-                        {p.imagen ? <img src={p.imagen} alt={p.nombre} className="w-full h-full object-cover" /> : <span className="text-[9px] text-neutral-500">IMG</span>}
+                        {(p.imagenUrl || p.imagen) ? <img src={p.imagenUrl || p.imagen} alt={p.nombre} className="w-full h-full object-cover" /> : <span className="text-[9px] text-neutral-500">IMG</span>}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">{p.nombre}</div>
@@ -2012,7 +2552,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                     <tr key={p.sku} className="border-t border-neutral-800">
                       <td className="p-3 font-medium flex items-center gap-3">
                         <div className="w-8 h-8 rounded-md bg-neutral-800 border border-neutral-700 overflow-hidden flex items-center justify-center">
-                          {p.imagen ? <img src={p.imagen} alt={p.nombre} className="w-full h-full object-cover" /> : <span className="text-[9px] text-neutral-500">IMG</span>}
+                          {(p.imagenUrl || p.imagen) ? <img src={p.imagenUrl || p.imagen} alt={p.nombre} className="w-full h-full object-cover" /> : <span className="text-[9px] text-neutral-500">IMG</span>}
                         </div>
                         <span className="truncate max-w-[180px]">{p.nombre}</span>
                       </td>
@@ -3373,11 +3913,11 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
                 <div className="text-[15px] font-semibold tracking-wide text-center uppercase leading-snug line-clamp-2 px-1" title={p.nombre}>{p.nombre}</div>
                 <div className="relative w-full rounded-2xl bg-neutral-800 overflow-hidden border border-neutral-700 shadow-inner">
                   <div className="w-full pb-[100%]"></div>
-                  {p.imagen ? (
-                    <img src={p.imagen} alt={p.nombre} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" />
-                  ) : (
-                    <span className="absolute inset-0 flex items-center justify-center text-[11px] text-neutral-500">SIN IMAGEN</span>
-                  )}
+                  {(() => {
+                    const src = p.imagen || p.imagenUrl || p.imagen_url || p.imagenURL || null;
+                    if(src) return <img src={src} alt={p.nombre} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" />;
+                    return <span className="absolute inset-0 flex items-center justify-center text-[11px] text-neutral-500">SIN IMAGEN</span>;
+                  })()}
                   {!esSintetico && (
                     <div className="absolute top-2 left-2 bg-black/60 px-3 py-1 rounded-lg text-[20px] font-semibold text-[#f09929] leading-none" title={`Stock base: ${stockBase}\nPendientes: ${ventasPendientes}`}>{disponible}</div>
                   )}
@@ -4125,18 +4665,18 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBac
       {active && (
         <>
           <div className="grid md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-2xl bg-[#0f171e] border border-neutral-800 text-[12px] space-y-1">
+            <div className="p-4 rounded-2xl bg-[#0f171e] text-[12px] space-y-1">
               <div><span className="text-neutral-400">Pedidos confirmados:</span> <span className="font-semibold text-[#e7922b]">{resumen.ventasConfirmadas}</span></div>
               <div><span className="text-neutral-400">Pedidos sintéticos:</span> <span className="font-semibold text-[#e7922b]">{resumen.ventasSinteticas}</span></div>
               <div><span className="text-neutral-400">Cancelados c/costo:</span> <span className="font-semibold text-red-400">{resumen.canceladasConCosto}</span></div>
               <div><span className="text-neutral-400">Total pedidos:</span> <span className="font-semibold text-[#e7922b]">{resumen.totalPedidos}</span></div>
             </div>
-            <div className="p-4 rounded-2xl bg-[#0f171e] border border-neutral-800 text-[12px] space-y-1">
+            <div className="p-4 rounded-2xl bg-[#0f171e] text-[12px] space-y-1">
               <div><span className="text-neutral-400">Monto bruto:</span> {currency(resumen.totalMonto||0)}</div>
               <div><span className="text-neutral-400">Delivery:</span> {currency(resumen.totalDelivery||0)}</div>
               <div><span className="text-neutral-400">Neto:</span> <span className="font-semibold text-[#e7922b]">{currency(resumen.totalNeto||0)}</span></div>
             </div>
-            <form onSubmit={e=>{ e.preventDefault(); const amount = montoDepositado? Number(montoDepositado): resumen.totalNeto; setConfirmingDeposit({ amount, note: nota }); }} className="p-4 rounded-2xl bg-[#0f171e] border border-neutral-800 text-[12px] space-y-2">
+            <form onSubmit={e=>{ e.preventDefault(); const amount = montoDepositado? Number(montoDepositado): resumen.totalNeto; setConfirmingDeposit({ amount, note: nota }); }} className="p-4 rounded-2xl bg-[#0f171e] text-[12px] space-y-2">
               <div className="font-semibold text-[#e7922b] text-sm mb-1">Registrar Depósito</div>
               <label className="flex flex-col gap-1">Monto depositado
                 <input value={montoDepositado} onChange={e=>setMontoDepositado(e.target.value)} placeholder={currency(resumen.totalNeto||0)} className="bg-neutral-800 rounded-lg px-2 py-1" />
@@ -4150,7 +4690,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBac
               </div>
             </form>
           </div>
-          <div className="rounded-2xl bg-[#0f171e] border border-neutral-800 p-4 overflow-auto">
+          <div className="rounded-2xl bg-[#0f171e] p-4 overflow-auto">
             <div className="text-sm font-semibold mb-3">Pedidos incluidos en la limpieza</div>
             <table className="w-full text-[11px] min-w-[1180px]">
           <thead className="bg-neutral-800/60">
@@ -4176,7 +4716,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBac
               const cantidades = orderedSkus.map(sku=>{
                 if(esCanc) return 0; let c=0; if(r.sku===sku) c+=Number(r.cantidad||0); if(r.skuExtra===sku) c+=Number(r.cantidadExtra||0); return c; });
               return (
-                <tr key={r.id} className="border-t border-neutral-800">
+                <tr key={r.id} className="">
                   <td className="p-2">{toDMY(r.fecha)}</td>
                   <td className="p-2">{r.hora}</td>
                   <td className="p-2">{r.ciudad}</td>
@@ -4193,7 +4733,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBac
             })}
     {!active.rows.length && <tr><td colSpan={orderedSkus.length+10} className="p-6 text-center text-neutral-500 text-sm">Sin datos</td></tr>}
           </tbody>
-          {active.rows.length>0 && ( ()=>{ const totSku={}; active.rows.forEach(r=>{ if(r.sinteticaCancelada) return; if(r.sku) totSku[r.sku]=(totSku[r.sku]||0)+Number(r.cantidad||0); if(r.skuExtra) totSku[r.skuExtra]=(totSku[r.skuExtra]||0)+Number(r.cantidadExtra||0); }); return (<tfoot><tr className="border-t border-neutral-800 bg-neutral-900/40"><td className="p-2 text-[10px] font-semibold text-neutral-400" colSpan={4}>Totales</td>{orderedSkus.map(sku=> <td key={sku} className="p-2 text-center font-semibold text-[#e7922b]">{totSku[sku]||''}</td>)}<td className="p-2 text-right font-bold text-[#e7922b]">{currency(resumen.totalMonto||0)}</td><td className="p-2 text-right font-bold text-[#e7922b]">{resumen.totalDelivery? currency(resumen.totalDelivery):''}</td><td className="p-2 text-right font-bold text-[#e7922b]">{currency(resumen.totalNeto||0)}</td><td className="p-2"></td><td className="p-2"></td><td className="p-2"></td></tr></tfoot>); })()}
+          {active.rows.length>0 && ( ()=>{ const totSku={}; active.rows.forEach(r=>{ if(r.sinteticaCancelada) return; if(r.sku) totSku[r.sku]=(totSku[r.sku]||0)+Number(r.cantidad||0); if(r.skuExtra) totSku[r.skuExtra]=(totSku[r.skuExtra]||0)+Number(r.cantidadExtra||0); }); return (<tfoot><tr className="bg-neutral-900/40"><td className="p-2 text-[10px] font-semibold text-neutral-400" colSpan={4}>Totales</td>{orderedSkus.map(sku=> <td key={sku} className="p-2 text-center font-semibold text-[#e7922b]">{totSku[sku]||''}</td>)}<td className="p-2 text-right font-bold text-[#e7922b]">{currency(resumen.totalMonto||0)}</td><td className="p-2 text-right font-bold text-[#e7922b]">{resumen.totalDelivery? currency(resumen.totalDelivery):''}</td><td className="p-2 text-right font-bold text-[#e7922b]">{currency(resumen.totalNeto||0)}</td><td className="p-2"></td><td className="p-2"></td><td className="p-2"></td></tr></tfoot>); })()}
         </table>
           </div>
         </>
