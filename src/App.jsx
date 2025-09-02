@@ -807,13 +807,14 @@ export default function App() {
 
   // ---- Reset total (debe vivir aquí para acceder a suppressSyncRef) ----
   const [lastResetInfo, setLastResetInfo] = useState(null); // {before, after, ts}
+  const [globalNotice, setGlobalNotice] = useState(null); // {msg, ts}
   async function handleResetAll(){
     if(!session || session.rol!== 'admin') { alert('Solo admin'); return; }
     if(!window.confirm('¿Borrar absolutamente TODA la información (ventas, historial, productos, despachos, mensajes, números, snapshots) tanto local como en la nube? Esta acción no se puede deshacer.')) return;
     suppressSyncRef.current = true;
     // Cancelar timers de sync ya programados para evitar re-upsert después del borrado
     try { Object.values(debounceRef.current).forEach(id=> clearTimeout(id)); } catch{}
-    try {
+  try {
   if(usingCloud){
         try {
           // Contar filas antes (diagnóstico)
@@ -834,7 +835,14 @@ export default function App() {
           try { await clearTable('products'); } catch(e){ console.warn('clear products', e); }
           try { if(supabase) { await supabase.from('users').delete().neq('rol','admin'); } } catch(e){ console.warn('clear non-admin users', e); }
           // Insertar marca de reset global
-          try { const sb = supabase; if(sb) await sb.from('resets').insert({}); } catch(e){ console.warn('insert reset marker', e); }
+          try {
+            const sb = supabase;
+            if(sb){
+              const { data:resetData, error:resetErr } = await sb.from('resets').insert({}).select('created_at').single();
+              if(resetErr){ console.warn('[reset-sync] error al insertar marca resets', resetErr); setGlobalNotice({ msg:'Fallo al insertar marca reset', ts:Date.now() }); }
+              else { console.info('[reset-sync] marca reset insertada', resetData); }
+            } else console.warn('insert reset marker: supabase undefined');
+          } catch(e){ console.warn('insert reset marker', e); setGlobalNotice({ msg:'Fallo al insertar marca de reset (revisa políticas resets)', ts:Date.now() }); }
           // Contar después
             const after = {};
             await Promise.all(tables.map(async t=>{ try { after[t] = (await fetchAll(t)).length; } catch { after[t] = 'err'; } }));
@@ -875,7 +883,8 @@ export default function App() {
         localStorage.removeItem('ui.view');
         localStorage.removeItem('ui.cityFilter');
       } catch{}
-      alert('Datos borrados local + nube (ver consola para detalles).');
+  alert('Datos borrados local + nube (ver consola para detalles).');
+  setGlobalNotice({ msg:'Reset ejecutado aquí', ts:Date.now() });
       setView('dashboard');
     } catch(e){ console.error(e); alert('Error al borrar datos'); }
   finally { setTimeout(()=>{ suppressSyncRef.current = false; }, 3000); }
@@ -908,20 +917,45 @@ export default function App() {
           }
         }
       } catch(e){ if(window._SYNC_DEBUG) console.warn('[resets] excepción inicial', e); return; }
-      if(disposed || missing) return; start();
+      if(disposed) return;
+      if(missing){
+        // Reintentar descubrir la tabla cada 5s hasta que exista
+        function retry(){
+          if(disposed || !missing) return;
+          sb.from('resets').select('created_at').limit(1).then(({ error })=>{
+            if(!error){ missing=false; console.info('[reset-sync] tabla resets ahora existe, iniciando suscripción'); start(); }
+            else {
+              const msg=(error.message||'').toLowerCase();
+              if(msg.includes('not found')||msg.includes('does not exist')||error.code==='42P01'){
+                setTimeout(retry, 5000);
+              } else {
+                // otro error: seguir intentando más lento
+                setTimeout(retry, 8000);
+              }
+            }
+          }).catch(()=> setTimeout(retry,5000));
+        }
+        setTimeout(retry, 4000);
+        return;
+      }
+      start();
     }
     function applyRemoteReset(ts){
       if(disposed) return; if(ts && ts===lastSeen) return; lastSeen=ts; try { localStorage.setItem(LS_RESET_KEY, ts||''); } catch{}
+      console.info('[reset-sync] remote reset marker', ts);
       suppressSyncRef.current=true;
       setSales([]); setProducts([]); setDispatches([]); setNumbers([]); setTeamMessages([]); setDepositSnapshots([]); setUsers(prev=>prev.filter(u=>u.rol==='admin'));
       try { const prefix='ventas.'; const keep=new Set(['ventas.session','ventas.resets.lastSeen']); const rm=[]; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(k&&k.startsWith(prefix)&&!keep.has(k)) rm.push(k);} rm.forEach(k=> localStorage.removeItem(k)); } catch{}
-  setTimeout(()=>{ if(!disposed) suppressSyncRef.current=false; },2500);
+      setTimeout(()=>{ if(!disposed) suppressSyncRef.current=false; },2500);
+      setGlobalNotice({ msg:'Otro dispositivo ejecutó un reset global', ts:Date.now() });
       alert('Borrado global detectado (otro dispositivo).');
     }
     function start(){
+      console.info('[reset-sync] iniciando canal resets');
       const channel = sb.channel('resets_broadcast')
-        .on('postgres_changes', { event:'INSERT', schema:'public', table:'resets' }, payload=>{ const ts=payload.new?.created_at; applyRemoteReset(ts); })
-        .subscribe();
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'resets' }, payload=>{ const ts=payload.new?.created_at; console.info('[reset-sync] evento INSERT resets recibido', payload); applyRemoteReset(ts); })
+        .subscribe((status)=>{ console.info('[reset-sync] estado canal resets:', status); });
+      channel.on('broadcast', (ev)=>{ if(__DBG) console.log('[resets broadcast]', ev); });
       let pollTimer; async function poll(){ if(disposed) return; try { const { data } = await sb.from('resets').select('created_at').order('created_at',{ascending:false}).limit(1); const ts=data&&data[0]?.created_at; if(ts && ts!==lastSeen) applyRemoteReset(ts); } catch(e){ } finally { if(!disposed) pollTimer=setTimeout(poll,2000); } }
       poll();
       cleanupFns.push(()=>{ try{ if(pollTimer) clearTimeout(pollTimer);}catch{}; try{ sb.removeChannel(channel);}catch{} });
@@ -930,11 +964,38 @@ export default function App() {
     return ()=>{ disposed=true; cleanupFns.forEach(f=>f()); };
   }, [usingCloud]);
 
+  // Fallback heurístico: si detectamos products locales >0 pero en nube =0 justo después de marcar un reset local insert fallido, intentar refetch y limpiar.
+  useEffect(()=>{
+    let cancelled=false;
+    async function check(){
+      if(!usingCloud || !cloudReady) return;
+      if(suppressSyncRef.current) return;
+      if(products.length===0) return; // nada que hacer
+      try {
+        const sb=supabase; if(!sb) return;
+        const { data, error } = await sb.from('products').select('id').limit(1);
+        if(!error && Array.isArray(data) && data.length===0){
+          console.warn('[reset-sync] heurística: nube vacía, local con datos -> limpiando local');
+          setProducts([]); setSales([]); setDispatches([]); setNumbers([]); setTeamMessages([]); setDepositSnapshots([]); setUsers(prev=>prev.filter(u=>u.rol==='admin'));
+          setGlobalNotice({ msg:'Sincronizado: limpieza por heurística (nube vacía)', ts:Date.now() });
+        }
+      } catch{}
+    }
+    const t=setTimeout(check, 5000);
+    return ()=>{ cancelled=true; clearTimeout(t); };
+  }, [products, usingCloud, cloudReady]);
+
 
   if (!session) return <Auth onLogin={(s)=>{ setSession(s); navigate('dashboard'); }} users={users} products={products} />;
 
   return (
   <div className="min-h-screen bg-[#121f27] text-neutral-100 flex">
+  {globalNotice && (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[#0f171e]/90 border border-neutral-700 shadow text-sm flex items-center gap-3">
+      <span>{globalNotice.msg}</span>
+      <button onClick={()=>setGlobalNotice(null)} className="text-xs text-[#e7922b] hover:underline">Cerrar</button>
+    </div>
+  )}
   {/* DebugOverlay removido para producción */}
   <Sidebar session={session} onLogout={() => { try { localStorage.removeItem(LS_KEYS.session); } catch{}; setSession(null); setView('dashboard'); }} view={view} setView={navigate} />
       {/* Barra de navegación histórica (atrás / adelante) */}
