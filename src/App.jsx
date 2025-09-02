@@ -832,7 +832,7 @@ export default function App() {
           ]);
           // Borrar productos y usuarios no-admin (separado para preservar al menos un admin)
           try { await clearTable('products'); } catch(e){ console.warn('clear products', e); }
-          try { const sb = supabase; if(sb) { await sb.from('users').delete().neq('rol','admin'); } } catch(e){ console.warn('clear non-admin users', e); }
+          try { if(supabase) { await supabase.from('users').delete().neq('rol','admin'); } } catch(e){ console.warn('clear non-admin users', e); }
           // Insertar marca de reset global
           try { const sb = supabase; if(sb) await sb.from('resets').insert({}); } catch(e){ console.warn('insert reset marker', e); }
           // Contar después
@@ -851,7 +851,7 @@ export default function App() {
                   clearTable('deposit_snapshots').catch(()=>{}),
                   clearTable('products').catch(()=>{})
                 ]);
-                try { if(sb) await sb.from('users').delete().neq('rol','admin'); } catch{}
+                try { if(supabase) await supabase.from('users').delete().neq('rol','admin'); } catch{}
               } catch(e){ console.warn('[RESET] error reintento', e); }
               // Recontar
               await Promise.all(tables.map(async t=>{ try { after[t] = (await fetchAll(t)).length; } catch { } }));
