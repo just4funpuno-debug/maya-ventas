@@ -587,7 +587,11 @@ export default function App() {
         if(!error && Array.isArray(data)){
           const remoteIds = new Set(data.map(r=>r.id));
           const remoteSkus = new Set(data.map(r=>r.sku));
-          setProducts(prev=> prev.filter(p=> remoteIds.has(p.id) || remoteSkus.has(p.sku)));
+          setProducts(prev=> prev.filter(p=> {
+            // proteger productos recién creados (si ya definimos recentProductsRef global la usamos)
+            try { if(recentProductsRef?.current && (recentProductsRef.current.has(p.id) || recentProductsRef.current.has(p.sku))) return true; } catch{}
+            return remoteIds.has(p.id) || remoteSkus.has(p.sku);
+          }));
         }
       } catch(e){ /* ignore network */ }
       finally { if(!stop) timer=setTimeout(reconcile, 8000); }
@@ -2446,6 +2450,8 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
   const [priceDraftPrecioPar, setPriceDraftPrecioPar] = useState('');
   const [priceConfirmOpen, setPriceConfirmOpen] = useState(false);
   const pricePendingRef = useRef(null);
+  // Productos recién agregados (gracia contra reconciliación prematura)
+  const recentProductsRef = useRef(new Set());
 
   useEffect(()=>{ setUsage(estimateLocalStorageUsage()); }, [products]);
 
@@ -2461,6 +2467,23 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
     } else {
       setProducts([...products, data]);
       setMensaje('Producto agregado');
+      // Protección y upsert inmediato
+      try {
+        recentProductsRef.current.add(data.id);
+        recentProductsRef.current.add(data.sku);
+        setTimeout(()=>{ recentProductsRef.current.delete(data.id); recentProductsRef.current.delete(data.sku); }, 15000);
+        if(supabase){
+          supabase.from('products').upsert([{
+            id:data.id,
+            sku:data.sku,
+            nombre:data.nombre,
+            stock:data.stock,
+            imagen_url:data.imagenUrl||null,
+            imagen_id:data.imagenId||null,
+            sintetico:!!data.sintetico
+          }]).then(({error})=>{ if(error) console.warn('[products] upsert inmediato error', error); });
+        }
+      } catch(e){ /* ignore */ }
     }
     resetForm();
     return true;
