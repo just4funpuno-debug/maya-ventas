@@ -571,6 +571,27 @@ export default function App() {
     try { await upsert('products', products.map(p=>({ id:p.id, sku:p.sku, nombre:p.nombre, precio:p.precio, costo:p.costo, stock:p.stock, imagen_url:p.imagenUrl||null, imagen_id:p.imagenId||null, sintetico:!!p.sintetico }))); } catch(e){ console.warn('sync products', e); }
   }); }, [products, usingCloud, cloudReady]);
 
+  // Reconciliación periódica: elimina localmente productos que ya no existen en la nube (evita "resurrección")
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return;
+    let stop=false; let timer;
+    async function reconcile(){
+      if(stop) return;
+      try {
+        const sb = supabase; if(!sb) return;
+        const { data, error } = await sb.from('products').select('id,sku');
+        if(!error && Array.isArray(data)){
+          const remoteIds = new Set(data.map(r=>r.id));
+          const remoteSkus = new Set(data.map(r=>r.sku));
+          setProducts(prev=> prev.filter(p=> remoteIds.has(p.id) || remoteSkus.has(p.sku)));
+        }
+      } catch(e){ /* ignore network */ }
+      finally { if(!stop) timer=setTimeout(reconcile, 8000); }
+    }
+    timer=setTimeout(reconcile, 6000); // primer pase después de 6s
+    return ()=>{ stop=true; clearTimeout(timer); };
+  }, [usingCloud, cloudReady]);
+
   // Realtime para products (INSERT/UPDATE/DELETE) – evita tener que recargar para ver cambios de otro dispositivo
   useEffect(()=>{
     if(!usingCloud || !cloudReady) return; // sólo en modo nube
