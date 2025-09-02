@@ -497,8 +497,29 @@ export default function App() {
         ]);
         if(p.length) setProducts(prev=>{
           const map=new Map(prev.map(x=>[x.id,x]));
-          p.forEach(r=>{ map.set(r.id,{ id:r.id, sku:r.sku, nombre:r.nombre, precio:Number(r.precio||0), costo:Number(r.costo||0), stock:Number(r.stock||0), imagenUrl:r.imagen_url, imagenId:r.imagen_id, sintetico:r.sintetico, delivery: r.delivery!=null? Number(r.delivery)||0 : null, precioPar: r.precio_par!=null? Number(r.precio_par)||0 : null }); });
-          return Array.from(map.values());
+          p.forEach(r=>{
+            const existing = map.get(r.id) || prev.find(x=>x.sku===r.sku);
+            // Si el remoto viene sin delivery/precio_par pero local ya tenía un valor (p.ej. recién ingresado y aún no propagado), preservamos el local.
+            const remoteDelivery = r.delivery!=null ? Number(r.delivery)||0 : null;
+            const remotePrecioPar = r.precio_par!=null ? Number(r.precio_par)||0 : null;
+            const finalDelivery = (remoteDelivery==null && existing && existing.delivery!=null) ? existing.delivery : remoteDelivery;
+            const finalPrecioPar = (remotePrecioPar==null && existing && existing.precioPar!=null) ? existing.precioPar : remotePrecioPar;
+            map.set(r.id, {
+              id:r.id,
+              sku:r.sku,
+              nombre:r.nombre,
+              precio:Number(r.precio||0),
+              costo:Number(r.costo||0),
+              stock:Number(r.stock||0),
+              imagenUrl:r.imagen_url,
+              imagenId:r.imagen_id,
+              sintetico:r.sintetico,
+              delivery: finalDelivery,
+              precioPar: finalPrecioPar,
+              totalPorVender: null
+            });
+          });
+            return Array.from(map.values());
         });
         if(u.length) setUsers(prev=>{
           const map=new Map(prev.map(x=>[x.id,x]));
@@ -615,14 +636,31 @@ export default function App() {
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'products' }, (payload)=>{
           const row = mapRow(payload.new||{});
           setProducts(prev=>{
-            if(prev.some(p=>p.id===row.id || p.sku===row.sku)) return prev.map(p=> (p.id===row.id || p.sku===row.sku) ? { ...p, ...row } : p);
+            if(prev.some(p=>p.id===row.id || p.sku===row.sku)) return prev.map(p=> {
+              if(p.id===row.id || p.sku===row.sku){
+                const merged = { ...p, ...row };
+                // Preservar valores locales si remoto viene null (p.ej. latencia de propagación)
+                if((row.delivery==null || row.delivery===undefined) && p.delivery!=null) merged.delivery = p.delivery;
+                if((row.precioPar==null || row.precioPar===undefined) && p.precioPar!=null) merged.precioPar = p.precioPar;
+                return merged;
+              }
+              return p;
+            });
             return [...prev, row];
           });
           if(typeof __DBG!=='undefined' && __DBG) console.log('[realtime products] INSERT', row.sku);
         })
         .on('postgres_changes', { event:'UPDATE', schema:'public', table:'products' }, (payload)=>{
           const row = mapRow(payload.new||{});
-            setProducts(prev=> prev.map(p=> (p.id===row.id || p.sku===row.sku) ? { ...p, ...row } : p));
+          setProducts(prev=> prev.map(p=>{
+            if(p.id===row.id || p.sku===row.sku){
+              const merged = { ...p, ...row };
+              if((row.delivery==null || row.delivery===undefined) && p.delivery!=null) merged.delivery = p.delivery;
+              if((row.precioPar==null || row.precioPar===undefined) && p.precioPar!=null) merged.precioPar = p.precioPar;
+              return merged;
+            }
+            return p;
+          }));
           if(typeof __DBG!=='undefined' && __DBG) console.log('[realtime products] UPDATE', row.sku);
         })
         .on('postgres_changes', { event:'DELETE', schema:'public', table:'products' }, (payload)=>{
@@ -2455,7 +2493,9 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
   const setPriceDraft = (sku, field, value)=>{ priceDraftsRef.current[sku] = { ...(priceDraftsRef.current[sku]||{}), [field]: value }; forcePriceDraftTick(x=>x+1); };
   const applyInlinePrice = async (sku)=>{
     const draft = priceDraftsRef.current[sku]||{}; let d=draft.delivery; let pr=draft.precioPar;
-    if(d==='') d=undefined; if(pr==='') pr=undefined;
+    // Evitar borrar: si usuario deja vacío, conservar valor anterior
+    const prev = products.find(p=>p.sku===sku);
+    if(d==='') d = prev?.delivery; if(pr==='') pr = prev?.precioPar;
     if(d!=null){ d=Number(d); if(isNaN(d)||d<0) d=undefined; }
     if(pr!=null){ pr=Number(pr); if(isNaN(pr)||pr<0) pr=undefined; }
     let snapshot;
@@ -2477,9 +2517,15 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
     products.forEach(p=>{
       if(!priceDraftsRef.current[p.sku]){
         priceDraftsRef.current[p.sku] = { delivery: p.delivery ?? '', precioPar: p.precioPar ?? '' };
+      } else {
+        // Mantener draft sincronizado si producto tenía valor previo y draft está vacío
+        const dRef = priceDraftsRef.current[p.sku];
+        if((dRef.delivery==='' || dRef.delivery==null) && p.delivery!=null) dRef.delivery = p.delivery;
+        if((dRef.precioPar==='' || dRef.precioPar==null) && p.precioPar!=null) dRef.precioPar = p.precioPar;
       }
     });
   }, [products]);
+
   // Productos recién agregados (gracia contra reconciliación prematura)
   const recentProductsRef = useRef(new Set());
 
@@ -2787,8 +2833,15 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
           totalCiud += ciudadesPorSku[p.sku]||0;
         });
         // Calcular TOTAL POR VENDER agregado (solo visibles con precio/delivery definidos)
+        // Calcular totalPorVenderNacional y por producto usando siempre los datos actuales (inputs o producto)
         const totalPorVenderNacional = visibles.reduce((acc,p)=>{
-          const pend=pendientesPorSku[p.sku]||0; const city=ciudadesPorSku[p.sku]||0; const totalProd=Number(p.stock||0)+pend+city; const pares=Math.floor(totalProd/2); const delivery=Number(p.delivery||0); const precio=Number(p.precioPar||0); if(precio>0){ acc += (precio - delivery) * pares; } return acc; },0);
+          const draft = priceDraftsRef.current[p.sku]||{};
+          const deliveryVal = draft.delivery!==undefined?draft.delivery:(p.delivery??'');
+          const precioVal = draft.precioPar!==undefined?draft.precioPar:(p.precioPar??'');
+          const pend=pendientesPorSku[p.sku]||0; const city=ciudadesPorSku[p.sku]||0; const totalProd=Number(p.stock||0)+pend+city; const pares=Math.floor(totalProd/2);
+          const delivery=Number(deliveryVal||0); const precio=Number(precioVal||0); const valor=(precio>0)?((precio-delivery)*pares):0;
+          return acc+valor;
+        },0);
         return (
           <div className="mt-10 grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-3 rounded-2xl bg-[#0f171e] border border-neutral-800 p-5">
@@ -2829,43 +2882,46 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
                         </div>
                         {(() => {
                           const draft = priceDraftsRef.current[p.sku]||{};
-                          const editMode = draft.__edit === true;
+                          const locked = !!draft.locked; // estado fijado
                           const deliveryVal = draft.delivery!==undefined?draft.delivery:(p.delivery??'');
                           const precioVal = draft.precioPar!==undefined?draft.precioPar:(p.precioPar??'');
-                          const dirty = (
-                            (deliveryVal!=='' && Number(deliveryVal||0)!==Number(p.delivery||0)) || (deliveryVal==='' && p.delivery!=null) ||
-                            (precioVal!=='' && Number(precioVal||0)!==Number(p.precioPar||0)) || (precioVal==='' && p.precioPar!=null)
-                          );
-                          const toggleEdit = ()=>{
-                            priceDraftsRef.current[p.sku] = { ...draft, __edit: !editMode };
+                          const changed = (valOrig, valDraft)=>{
+                            const a = (valOrig==null||valOrig==='')? '' : String(valOrig);
+                            const b = (valDraft==null||valDraft==='')? '' : String(valDraft);
+                            return a!==b;
+                          };
+                          const onKey = e=>{ if(e.key==='Enter'){ e.currentTarget.blur(); } };
+                          const saveIfChanged = ()=>{ if(changed(p.delivery, deliveryVal) || changed(p.precioPar, precioVal)) applyInlinePrice(p.sku); };
+                          const fijar = ()=>{ saveIfChanged(); priceDraftsRef.current[p.sku] = { ...priceDraftsRef.current[p.sku], locked:true }; forcePriceDraftTick(x=>x+1); };
+                          const eliminar = ()=>{
+                            // Quitar valores (solo si realmente queremos borrar)
+                            priceDraftsRef.current[p.sku] = { delivery:'', precioPar:'', locked:false };
+                            setProducts(prev=> prev.map(x=> x.sku===p.sku? { ...x, delivery:null, precioPar:null }: x));
+                            try { if(supabase) supabase.from('products').update({ delivery:null, precio_par:null }).eq('id', p.id); } catch{}
                             forcePriceDraftTick(x=>x+1);
                           };
-                          const save = async ()=>{ await applyInlinePrice(p.sku); priceDraftsRef.current[p.sku] = { ...priceDraftsRef.current[p.sku], __edit:false }; forcePriceDraftTick(x=>x+1); };
+                          const disableInputs = locked; // si está fijado no se edita hasta eliminar
+                          // Calcular total por vender con valores fijados / actuales
+                          const pend=pendientesPorSku[p.sku]||0; const city=ciudadesPorSku[p.sku]||0; const totalProd=Number(p.stock||0)+pend+city; const pares=Math.floor(totalProd/2);
+                          const delivery=Number(deliveryVal||0); const precio=Number(precioVal||0); const totalPV=(precio>0)?((precio-delivery)*pares):0;
                           return (
-                            <div className="mt-2 text-[10px] text-neutral-300 flex flex-wrap gap-2 items-end w-full">
-                              {editMode ? (
-                                <>
-                                  <div className="flex flex-col gap-1">
-                                    <label className="text-[9px] uppercase tracking-wide text-neutral-500">Delivery</label>
-                                    <input type="number" min="0" value={deliveryVal} onChange={e=> setPriceDraft(p.sku,'delivery', e.target.value)} className="w-20 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
-                                  </div>
-                                  <div className="flex flex-col gap-1">
-                                    <label className="text-[9px] uppercase tracking-wide text-neutral-500">Precio/par</label>
-                                    <input type="number" min="0" step="0.01" value={precioVal} onChange={e=> setPriceDraft(p.sku,'precioPar', e.target.value)} className="w-24 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
-                                  </div>
-                                  <div className="ml-auto flex gap-2 mt-5">
-                                    <button onClick={toggleEdit} className="px-3 h-7 rounded bg-neutral-700 text-neutral-300 text-[10px]">Cancelar</button>
-                                    <button disabled={!dirty} onClick={save} className={"px-3 h-7 rounded text-[10px] font-semibold "+(dirty?"bg-[#e7922b] text-[#1a2430] hover:brightness-110":"bg-neutral-700 text-neutral-500 cursor-not-allowed")}>{dirty? 'Guardar':'OK'}</button>
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <span>Delivery: <b className="text-neutral-200">{p.delivery ?? '-'}</b></span>
-                                  <span>Precio/par: <b className="text-neutral-200">{p.precioPar ?? '-'}</b></span>
-                                  <button onClick={toggleEdit} className="ml-auto px-3 h-7 rounded bg-neutral-700 hover:bg-neutral-600 text-[10px]">Editar</button>
-                                </>
-                              )}
-                            </div>
+                            <>
+                              <div className="mt-2 text-[10px] text-neutral-300 flex flex-wrap gap-3 items-end w-full">
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[9px] uppercase tracking-wide text-neutral-500">Delivery</label>
+                                  <input type="number" min="0" value={deliveryVal} disabled={disableInputs} onChange={e=> setPriceDraft(p.sku,'delivery', e.target.value)} onBlur={()=>{ if(!locked) saveIfChanged(); }} onKeyDown={onKey} className={"w-24 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none "+(disableInputs?"opacity-60 cursor-not-allowed":"focus:border-[#e7922b]")} />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[9px] uppercase tracking-wide text-neutral-500">Precio/par</label>
+                                  <input type="number" min="0" step="0.01" value={precioVal} disabled={disableInputs} onChange={e=> setPriceDraft(p.sku,'precioPar', e.target.value)} onBlur={()=>{ if(!locked) saveIfChanged(); }} onKeyDown={onKey} className={"w-28 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none "+(disableInputs?"opacity-60 cursor-not-allowed":"focus:border-[#e7922b]")} />
+                                </div>
+                                <div className="flex gap-2 ml-auto mt-5">
+                                  {!locked && <button onClick={fijar} className="px-3 h-7 rounded bg-[#e7922b] text-[#1a2430] text-[10px] font-semibold hover:brightness-110">Fijar</button>}
+                                  {locked && <button onClick={eliminar} className="px-3 h-7 rounded bg-red-600/80 hover:bg-red-600 text-[10px] font-semibold">Eliminar</button>}
+                                </div>
+                              </div>
+                              <div className="text-[10px] text-neutral-400 mt-1">TOTAL POR VENDER: <span className="text-[#e7922b] font-semibold">{totalPV.toFixed(2)}</span>{locked && <span className="ml-2 text-[9px] text-green-400">(fijado)</span>}</div>
+                            </>
                           );
                         })()}
                         {(() => { const delivery=Number(p.delivery||0); const precio=Number(p.precioPar||0); const totalPV = (precio>0)? ((precio - delivery) * pares) : 0; return (
