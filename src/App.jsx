@@ -1035,6 +1035,7 @@ export default function App() {
   // Fallback heurístico: si detectamos products locales >0 pero en nube =0 justo después de marcar un reset local insert fallido, intentar refetch y limpiar.
   useEffect(()=>{
     let cancelled=false;
+    let emptyCloudStreakRef = { count:0 };
     async function check(){
       if(!usingCloud || !cloudReady) return;
       if(suppressSyncRef.current) return;
@@ -1043,13 +1044,22 @@ export default function App() {
         const sb=supabase; if(!sb) return;
         const { data, error } = await sb.from('products').select('id').limit(1);
         if(!error && Array.isArray(data) && data.length===0){
-          console.warn('[reset-sync] heurística: nube vacía, local con datos -> limpiando local');
+          emptyCloudStreakRef.count++;
+        } else {
+          emptyCloudStreakRef.count=0; // se encontró algo o error -> resetear
+        }
+        // Sólo limpiar si cloud vacío se confirma varias veces (evita borrar tras crear producto antes del primer upsert / realtime)
+        if(emptyCloudStreakRef.count>=3){
+          console.warn('[reset-sync] heurística (triple confirm) nube vacía, limpiando local');
           setProducts([]); setSales([]); setDispatches([]); setNumbers([]); setTeamMessages([]); setDepositSnapshots([]); setUsers(prev=>prev.filter(u=>u.rol==='admin'));
-          setGlobalNotice({ msg:'Sincronizado: limpieza por heurística (nube vacía)', ts:Date.now() });
+          setGlobalNotice({ msg:'Sincronizado: limpieza heurística confirmada (nube vacía)', ts:Date.now() });
         }
       } catch{}
+      finally {
+        if(!cancelled) setTimeout(check, 4000);
+      }
     }
-    const t=setTimeout(check, 5000);
+    const t=setTimeout(check, 6000);
     return ()=>{ cancelled=true; clearTimeout(t); };
   }, [products, usingCloud, cloudReady]);
 
