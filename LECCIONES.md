@@ -104,6 +104,33 @@ end $$;
 - Tipar el proyecto (TypeScript) para reducir errores silenciosos.
 - Mover secretos Cloudinary a función serverless (firma).
 
+## 13. Eliminación de Productos ("Resurrección")
+
+Problema: Al borrar un producto desaparecía localmente pero reaparecía tras refrescar u en otra máquina. La fila en la nube nunca se eliminaba, por lo que al siguiente sync el producto regresaba ("resurrección").
+
+Raíces específicas:
+
+1. ReferenceError: la función `remove` usaba variables inexistentes (`usingCloud` / `cloudReady`) → excepción silenciosa en producción (solo se veía en consola) y abortaba antes del `delete` remoto.
+2. Carrera con upsert diferido: un debounce de sincronización podía todavía ejecutar un upsert del producto ya marcado para eliminación, recreándolo si se había alcanzado a borrar.
+3. Falta de verificación de filas afectadas: no se chequeaba si el `delete` realmente borró (affected=1) para registrar éxito o fallback.
+4. Sin reconciliación periódica: si se perdía un evento Realtime DELETE (o fallaba el delete remoto) no había mecanismo de poda eventual hasta que recargabas manualmente.
+
+Solución aplicada:
+
+- Reescritura de `remove(p)` usando un flag seguro `hasCloud` y eliminando referencias a variables no definidas.
+- Intento de delete por `id` y fallback por `sku`, solicitando `select('id')` para conocer `count` real y loguear `[products] eliminado remoto filas:`.
+- Logs claros de fallo para diagnóstico rápido.
+- Efecto de reconciliación periódico (fetch remoto y poda local de ids/skus inexistentes) → consistencia eventual incluso si se pierde un evento.
+
+Prevención futura:
+
+- Activar ESLint/TypeScript para detectar `no-undef` antes de build.
+- Cancelar / invalidar debounced upsert cuando se encola una eliminación (o marcar estado `deleted` hasta confirmar).
+- Siempre loggear y verificar `count` en operaciones críticas (delete/update) y reaccionar si es 0.
+- Añadir test E2E: crear producto A, abrir segunda pestaña, borrar en una, confirmar desaparición (<10s) en la otra.
+
+Indicador de éxito: aparición de log `[products] eliminado remoto filas: 1 <sku>` y recepción de evento `[realtime products] DELETE` en la otra pestaña; producto no vuelve tras 2 ciclos de reconciliación.
+
 ---
 
 Mantén este archivo vivo; actualiza cada nuevo incidente.

@@ -1086,7 +1086,7 @@ export default function App() {
         <CreateUserAdmin users={users} setUsers={setUsers} session={session} products={products} />
       )}
       {view === 'products' && session.rol === 'admin' && (
-        <ProductsView products={products} setProducts={setProducts} session={session} />
+  <ProductsView products={products} setProducts={setProducts} session={session} dispatches={dispatches} sales={sales} />
       )}
       {view === 'frases' && session.rol === 'admin' && (
         <FrasesView />
@@ -2313,11 +2313,9 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
 
 
 // ---------------------- Productos ----------------------
-function ProductsView({ products, setProducts, session }) {
+function ProductsView({ products, setProducts, session, dispatches=[], sales=[] }) {
   const [sku, setSku] = useState('');
   const [nombre, setNombre] = useState('');
-  const [precio, setPrecio] = useState('');
-  const [costo, setCosto] = useState('');
   const [stock, setStock] = useState('');
   // imagenBase64 se mantiene sólo para compatibilidad con productos previos
   const [imagenBase64, setImagenBase64] = useState(null);
@@ -2330,10 +2328,33 @@ function ProductsView({ products, setProducts, session }) {
   const [filter, setFilter] = useState('');
   const [usage, setUsage] = useState(() => estimateLocalStorageUsage());
   const [optimizing, setOptimizing] = useState(false);
+  const [confirmUpdateOpen, setConfirmUpdateOpen] = useState(false);
+  const pendingUpdateRef = useRef(null);
+  // Edición de delivery / precio por par
+  const [priceEditSku, setPriceEditSku] = useState(null);
+  const [priceDraftDelivery, setPriceDraftDelivery] = useState('');
+  const [priceDraftPrecioPar, setPriceDraftPrecioPar] = useState('');
+  const [priceConfirmOpen, setPriceConfirmOpen] = useState(false);
+  const pricePendingRef = useRef(null);
 
   useEffect(()=>{ setUsage(estimateLocalStorageUsage()); }, [products]);
 
-  function resetForm() { setSku(''); setNombre(''); setPrecio(''); setCosto(''); setStock(''); setImagenBase64(null); setImagenUrl(null); setImagenId(null); setEditingSku(null); setSintetico(false); setSubiendo(false); }
+  function resetForm() { setSku(''); setNombre(''); setStock(''); setImagenBase64(null); setImagenUrl(null); setImagenId(null); setEditingSku(null); setSintetico(false); setSubiendo(false); }
+
+  function applyProductUpdate(data, exists){
+    if (exists && editingSku) {
+      setProducts(products.map(p => p.sku === editingSku ? data : p));
+      setMensaje('Producto actualizado');
+    } else if (exists && !editingSku) {
+      setMensaje('Nombre genera código existente, intenta variar el nombre');
+      return false;
+    } else {
+      setProducts([...products, data]);
+      setMensaje('Producto agregado');
+    }
+    resetForm();
+    return true;
+  }
 
   function submit(e) {
     e.preventDefault();
@@ -2343,25 +2364,38 @@ function ProductsView({ products, setProducts, session }) {
     if (!generatedSku) {
       generatedSku = nombre.toUpperCase().replace(/[^A-Z0-9]+/g,'-').slice(0,8) + '-' + Math.random().toString(36).slice(2,5).toUpperCase();
     }
-  const exists = products.find(p => p.sku === generatedSku);
-  const data = { id: exists ? exists.id : uid(), sku: generatedSku, nombre: nombre.trim(), precio: sintetico?0:Number(precio||0), costo: sintetico?0:Number(costo||0), stock: sintetico?0:Number(stock||0), imagen: imagenBase64 || (exists ? exists.imagen : null), imagenUrl: imagenUrl || (exists ? exists.imagenUrl : null), imagenId: imagenId || (exists ? exists.imagenId : null), sintetico: sintetico?true:undefined };
+    const exists = products.find(p => p.sku === generatedSku);
+    const data = {
+      id: exists ? exists.id : uid(),
+      sku: generatedSku,
+      nombre: nombre.trim(),
+      stock: sintetico ? 0 : Number(stock || 0),
+      imagen: imagenBase64 || (exists ? exists.imagen : null),
+      imagenUrl: imagenUrl || (exists ? exists.imagenUrl : null),
+      imagenId: imagenId || (exists ? exists.imagenId : null),
+      sintetico: sintetico ? true : undefined,
+      // Preservar delivery y precioPar anteriores si ya existen (no se editan aquí)
+      delivery: exists ? exists.delivery : undefined,
+      precioPar: exists ? exists.precioPar : undefined
+    };
     if (exists && editingSku) {
-      setProducts(products.map(p => p.sku === editingSku ? data : p));
-  setMensaje('Producto actualizado');
-    } else if (exists && !editingSku) {
-  setMensaje('Nombre genera código existente, intenta variar el nombre');
+      // abrir modal confirmación
+      pendingUpdateRef.current = { data, exists: true };
+      setConfirmUpdateOpen(true);
       return;
-    } else {
-  // Agregar al final para mantener orden cronológico (primero creado arriba)
-  setProducts([...products, data]);
-      setMensaje('Producto agregado');
     }
-    resetForm();
+    applyProductUpdate(data, exists);
   }
 
   function edit(p) {
     setEditingSku(p.sku);
-  setSku(p.sku); setNombre(p.nombre); setPrecio(String(p.precio)); setCosto(String(p.costo)); setStock(String(p.stock)); setImagenBase64(p.imagen || null); setImagenUrl(p.imagenUrl || null); setImagenId(p.imagenId || null); setSintetico(!!p.sintetico);
+    setSku(p.sku);
+    setNombre(p.nombre);
+    setStock(String(p.stock));
+    setImagenBase64(p.imagen || null);
+    setImagenUrl(p.imagenUrl || null);
+    setImagenId(p.imagenId || null);
+    setSintetico(!!p.sintetico);
   }
   async function remove(p) {
     if (!confirm('¿Eliminar producto ' + p.sku + '?')) return;
@@ -2417,18 +2451,10 @@ function ProductsView({ products, setProducts, session }) {
           <form onSubmit={submit} className="space-y-4 text-sm">
             {/* Eliminado campo SKU visible: se autogenerará simple */}
             <input type="hidden" value={sku} readOnly />
-            <div>
-              <label className="text-xs uppercase tracking-wide text-neutral-400">Nombre *</label>
-              <input value={nombre} onChange={e=>setNombre(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Nombre del producto" />
-            </div>
             <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs uppercase tracking-wide text-neutral-400">Precio</label>
-                <input disabled={sintetico} type="number" step="0.01" value={precio} onChange={e=>setPrecio(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-40" />
-              </div>
-              <div>
-                <label className="text-xs uppercase tracking-wide text-neutral-400">Costo</label>
-                <input disabled={sintetico} type="number" step="0.01" value={costo} onChange={e=>setCosto(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1 disabled:opacity-40" />
+              <div className="col-span-2">
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Nombre *</label>
+                <input value={nombre} onChange={e=>setNombre(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Nombre del producto" />
               </div>
               <div>
                 <label className="text-xs uppercase tracking-wide text-neutral-400">Stock</label>
@@ -2554,41 +2580,195 @@ function ProductsView({ products, setProducts, session }) {
                 <tr>
                   <th className="text-left p-3">Img</th>
                   <th className="text-left p-3">Nombre</th>
-                  <th className="text-right p-3">Precio</th>
-                  <th className="text-right p-3">Costo</th>
                   <th className="text-right p-3">Stock</th>
-                  <th className="text-right p-3">Margen</th>
                   <th className="text-right p-3 w-28">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(p => {
-                  const margen = p.precio ? ((p.precio - p.costo) / p.precio) * 100 : 0;
-                  return (
-                    <tr key={p.sku} className="border-t border-neutral-800">
-            <td className="p-3">{(p.imagenUrl || p.imagen) ? <img src={p.imagenUrl || p.imagen} alt={p.nombre} className="w-10 h-10 object-cover rounded-md border border-neutral-700" /> : <div className="w-10 h-10 rounded-md bg-neutral-800 grid place-items-center text-[10px] text-neutral-500">N/A</div>}</td>
-                      <td className="p-3">{p.nombre}</td>
-                      <td className="p-3 text-right">{currency(p.precio)}</td>
-                      <td className="p-3 text-right">{currency(p.costo)}</td>
-                      <td className={"p-3 text-right " + (p.stock <= 5 ? 'text-red-400' : '')}>{p.stock}</td>
-                      <td className="p-3 text-right">{margen.toFixed(0)}%</td>
-                      <td className="p-3 text-right">
-                        <div className="flex gap-2 justify-end">
-                          <button onClick={()=>edit(p)} className="text-xs px-2 py-1 bg-neutral-700 rounded-lg">Editar</button>
-                          <button onClick={()=>remove(p)} className="text-xs px-2 py-1 bg-red-600/80 hover:bg-red-600 rounded-lg">Borrar</button>
-                        </div>
-                      </td>
-                    </tr>
-                );
-                })}
+                {filtered.map(p => (
+                  <tr key={p.sku} className="border-t border-neutral-800">
+                    <td className="p-3">{(p.imagenUrl || p.imagen) ? <img src={p.imagenUrl || p.imagen} alt={p.nombre} className="w-10 h-10 object-cover rounded-md border border-neutral-700" /> : <div className="w-10 h-10 rounded-md bg-neutral-800 grid place-items-center text-[10px] text-neutral-500">N/A</div>}</td>
+                    <td className="p-3">{p.nombre}</td>
+                    <td className={"p-3 text-right " + (p.stock <= 5 ? 'text-red-400' : '')}>{p.stock}</td>
+                    <td className="p-3 text-right">
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={()=>edit(p)} className="text-xs px-2 py-1 bg-neutral-700 rounded-lg">Editar</button>
+                        <button onClick={()=>remove(p)} className="text-xs px-2 py-1 bg-red-600/80 hover:bg-red-600 rounded-lg">Borrar</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={7} className="p-6 text-center text-neutral-500 text-sm">Sin resultados</td></tr>
+                  <tr><td colSpan={4} className="p-6 text-center text-neutral-500 text-sm">Sin resultados</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
+      {(() => {
+        const pendientesPorSku = {}; const confirmadosPorSku = {}; const ventasConfirmadas = {};
+        dispatches.forEach(d=> d.items.forEach(it=>{
+          if(d.status==='pendiente') pendientesPorSku[it.sku]=(pendientesPorSku[it.sku]||0)+Number(it.cantidad||0);
+          if(d.status==='confirmado') confirmadosPorSku[it.sku]=(confirmadosPorSku[it.sku]||0)+Number(it.cantidad||0);
+        }));
+        sales.filter(s=> (s.estadoEntrega||'confirmado')==='confirmado').forEach(s=>{
+          if(s.sku) ventasConfirmadas[s.sku]=(ventasConfirmadas[s.sku]||0)+Number(s.cantidad||0);
+          if(s.skuExtra) ventasConfirmadas[s.skuExtra]=(ventasConfirmadas[s.skuExtra]||0)+Number(s.cantidadExtra||0);
+        });
+        const ciudadesPorSku={}; Object.keys(confirmadosPorSku).forEach(sku=>{ const v=confirmadosPorSku[sku]-(ventasConfirmadas[sku]||0); ciudadesPorSku[sku]=v<0?0:v; });
+        // Filtrar productos visibles (no sintéticos)
+        const visibles = products.filter(p=> !p.sintetico);
+        // Totales sólo sobre visibles
+        let totalCentral=0,totalPend=0,totalCiud=0;
+        visibles.forEach(p=> {
+          totalCentral += Number(p.stock||0);
+          totalPend += pendientesPorSku[p.sku]||0;
+          totalCiud += ciudadesPorSku[p.sku]||0;
+        });
+        // Calcular TOTAL POR VENDER agregado (solo visibles con precio/delivery definidos)
+        const totalPorVenderNacional = visibles.reduce((acc,p)=>{
+          const pend=pendientesPorSku[p.sku]||0; const city=ciudadesPorSku[p.sku]||0; const totalProd=Number(p.stock||0)+pend+city; const pares=Math.floor(totalProd/2); const delivery=Number(p.delivery||0); const precio=Number(p.precioPar||0); if(precio>0){ acc += (precio - delivery) * pares; } return acc; },0);
+        return (
+          <div className="mt-10 grid lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-3 rounded-2xl bg-[#0f171e] border border-neutral-800 p-5">
+              <h3 className="text-sm font-semibold text-[#e7922b] mb-4 flex items-center gap-2"><Package className="w-4 h-4" /> Catálogo Completo</h3>
+              <div className="mb-4">
+                <div className="inline-block rounded-xl bg-neutral-900/60 border border-neutral-700 px-4 py-3">
+                  <div className="text-[11px] flex items-center gap-1 text-neutral-400"><CircleDollarSign className="w-3 h-3 text-[#e7922b]" /> POR VENDER NACIONAL</div>
+                  <div className="text-sm font-semibold text-[#e7922b] mt-1">{currency(totalPorVenderNacional,'BOB')}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4 text-[11px] mb-4">
+                <div className="px-3 py-2 rounded-lg bg-neutral-800/50 border border-neutral-700">Central: <span className="font-semibold text-[#e7922b]">{totalCentral}</span></div>
+                <div className="px-3 py-2 rounded-lg bg-neutral-800/50 border border-neutral-700">Por llegar: <span className="font-semibold text-[#e7922b]">{totalPend}</span></div>
+                <div className="px-3 py-2 rounded-lg bg-neutral-800/50 border border-neutral-700">En ciudades: <span className="font-semibold text-[#e7922b]">{totalCiud}</span></div>
+                <div className="px-3 py-2 rounded-lg bg-neutral-800/50 border border-neutral-700">Total: <span className="font-semibold text-[#e7922b]">{totalCentral+totalPend+totalCiud}</span></div>
+              </div>
+        {visibles.length===0 && <div className="text-xs text-neutral-500">No hay productos visibles (productos sintéticos ocultos).</div>}
+        {visibles.length>0 && (
+                <div className="grid sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          {visibles.map(p=> {
+                    const pend=pendientesPorSku[p.sku]||0; const city=ciudadesPorSku[p.sku]||0; const totalProd=Number(p.stock||0)+pend+city; const pares=Math.floor(totalProd/2);
+                    return (
+                      <div key={p.id||p.sku} className="flex flex-col gap-2 bg-neutral-800/40 border border-neutral-700/60 rounded-xl p-3 text-[11px]">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-md overflow-hidden bg-neutral-800 border border-neutral-700 flex items-center justify-center shrink-0">{(p.imagenUrl||p.imagen)?<img src={p.imagenUrl||p.imagen} alt={p.nombre} className="w-full h-full object-cover" />:<span className="text-[9px] text-neutral-500">IMG</span>}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate flex items-center gap-2" title={p.nombre}>
+                              <span className="truncate">{p.nombre}</span>
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-neutral-900/70 border border-neutral-700 text-[#e7922b] font-semibold shrink-0">TOTAL: {totalProd}</span>
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-neutral-900/50 border border-neutral-700 text-neutral-300 font-medium shrink-0">PARES: {pares}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mt-1">
+                          <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Central<br/><span className={p.stock<=5?'text-red-400 font-semibold':'text-neutral-200'}>{p.stock}</span></div>
+                          <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Pend.<br/><span className={pend>0?'text-yellow-400 font-semibold':'text-neutral-200'}>{pend}</span></div>
+                          <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Ciudades<br/><span className="text-neutral-200 font-semibold">{city}</span></div>
+                        </div>
+                        <div className="mt-2 text-[10px] text-neutral-400 flex flex-wrap gap-4 items-center">
+                          <span>Delivery: <b className="text-neutral-200">{p.delivery ?? '-'}</b></span>
+                          <span>Precio/par: <b className="text-neutral-200">{p.precioPar ?? '-'}</b></span>
+                          <button
+                            className="ml-auto text-[10px] underline text-neutral-400 hover:text-white"
+                            onClick={()=>{ setPriceEditSku(p.sku); setPriceDraftDelivery(p.delivery ?? ''); setPriceDraftPrecioPar(p.precioPar ?? ''); }}
+                          >Editar</button>
+                        </div>
+                        {(() => { const delivery=Number(p.delivery||0); const precio=Number(p.precioPar||0); const totalPV = (precio>0)? ((precio - delivery) * pares) : 0; return (
+                          <div className="mt-1 text-[10px] text-neutral-400 flex items-center justify-between">
+                            <span className="uppercase tracking-wide">TOTAL POR VENDER</span>
+                            <span className={totalPV>0? 'text-[#e7922b] font-semibold':'text-neutral-500'}>{totalPV.toFixed(2)}</span>
+                          </div>
+                        ); })()}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+      {confirmUpdateOpen && (
+        <Modal onClose={()=>{ setConfirmUpdateOpen(false); pendingUpdateRef.current=null; }}>
+          <div className="space-y-4 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-[#e7922b]">Confirmar actualización</h3>
+            <p className="text-xs text-neutral-300 leading-relaxed">Se actualizará el producto <span className="font-semibold text-neutral-100">{editingSku}</span>. ¿Deseas continuar?</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={()=>{ setConfirmUpdateOpen(false); pendingUpdateRef.current=null; }} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
+              <button onClick={()=>{ const pu = pendingUpdateRef.current; if(pu) applyProductUpdate(pu.data, pu.exists); setConfirmUpdateOpen(false); pendingUpdateRef.current=null; }} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Aplicar cambios</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {priceEditSku && (
+        <Modal onClose={()=> setPriceEditSku(null)}>
+          <div className="space-y-4 w-full max-w-xs">
+            <h3 className="text-sm font-semibold text-[#e7922b]">Editar Delivery / Precio</h3>
+            <div className="space-y-3 text-[12px]">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-neutral-500 mb-1">Delivery</label>
+                <input type="number" min="0" value={priceDraftDelivery} onChange={e=> setPriceDraftDelivery(e.target.value)} className="w-full bg-neutral-800 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-neutral-500 mb-1">Precio por par</label>
+                <input type="number" min="0" step="0.01" value={priceDraftPrecioPar} onChange={e=> setPriceDraftPrecioPar(e.target.value)} className="w-full bg-neutral-800 rounded px-3 py-2" />
+              </div>
+              {(() => { const p=products.find(x=>x.sku===priceEditSku); if(!p) return null; const totalProd=(Number(p.stock||0)+( (dispatches.filter(d=>d.status==='pendiente').flatMap(d=>d.items).filter(i=>i.sku===p.sku).reduce((a,b)=>a+Number(b.cantidad||0),0)) ) + 0); const pares=Math.floor((Number(p.stock||0)+( (dispatches.filter(d=>d.status==='pendiente').flatMap(d=>d.items).filter(i=>i.sku===p.sku).reduce((a,b)=>a+Number(b.cantidad||0),0)) ) )/2); const delivery=Number(priceDraftDelivery||0); const precio=Number(priceDraftPrecioPar||0); const totalPV=(precio>0)? ((precio-delivery)*pares):0; return <div className="text-[10px] text-neutral-400">Previsualización TOTAL POR VENDER: <span className="text-[#e7922b] font-semibold">{totalPV.toFixed(2)}</span></div>; })()}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={()=> setPriceEditSku(null)} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
+              <button onClick={()=>{
+                if(!priceEditSku) return; const d=priceDraftDelivery===''?undefined:Number(priceDraftDelivery); const pr=priceDraftPrecioPar===''?undefined:Number(priceDraftPrecioPar);
+                if((d!=null && d<0) || (pr!=null && pr<0)) return;
+                // Guardar en ref y abrir confirmación
+                pricePendingRef.current = { sku: priceEditSku, delivery: d, precioPar: pr };
+                setPriceEditSku(null);
+                setPriceConfirmOpen(true);
+              }} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Guardar</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {priceConfirmOpen && (
+        <Modal onClose={()=>{ setPriceConfirmOpen(false); pricePendingRef.current=null; }}>
+          <div className="space-y-4 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-[#e7922b]">Confirmar cambios</h3>
+            {(() => { const pending = pricePendingRef.current; if(!pending) return null; const prod = products.find(p=>p.sku===pending.sku); return (
+              <div className="text-[12px] text-neutral-300 space-y-2">
+                <div>Producto: <span className="font-semibold text-neutral-100">{prod?prod.nombre:pending.sku}</span></div>
+                <div className="grid grid-cols-2 gap-3 text-[11px]">
+                  <div className="bg-neutral-800/60 p-2 rounded">
+                    <div className="text-neutral-400">Delivery actual</div>
+                    <div className="font-mono">{prod && prod.delivery!=null?prod.delivery:'-'}</div>
+                  </div>
+                  <div className="bg-neutral-800/60 p-2 rounded">
+                    <div className="text-neutral-400">Delivery nuevo</div>
+                    <div className="font-mono text-[#e7922b]">{pending.delivery!=null?pending.delivery:'-'}</div>
+                  </div>
+                  <div className="bg-neutral-800/60 p-2 rounded">
+                    <div className="text-neutral-400">Precio actual</div>
+                    <div className="font-mono">{prod && prod.precioPar!=null?prod.precioPar:'-'}</div>
+                  </div>
+                  <div className="bg-neutral-800/60 p-2 rounded">
+                    <div className="text-neutral-400">Precio nuevo</div>
+                    <div className="font-mono text-[#e7922b]">{pending.precioPar!=null?pending.precioPar:'-'}</div>
+                  </div>
+                </div>
+              </div>
+            ); })()}
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={()=>{ setPriceConfirmOpen(false); pricePendingRef.current=null; }} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
+              <button onClick={()=>{
+                const pending = pricePendingRef.current; if(!pending) return;
+                setProducts(prev=> prev.map(p=> p.sku===pending.sku ? { ...p, delivery: pending.delivery, precioPar: pending.precioPar } : p));
+                setPriceConfirmOpen(false); pricePendingRef.current=null;
+              }} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Aplicar</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2602,6 +2782,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
   const [lineItems, setLineItems] = useState(() => products.map(p => ({ sku: p.sku, cantidad: 0 })));
   // Edición de despacho pendiente
   const [editId, setEditId] = useState(null);
+  const [confirmUpdateOpen, setConfirmUpdateOpen] = useState(false); // modal confirmación actualización
   const [filtroCiudad, setFiltroCiudad] = useState('');
 
   // Re-sincroniza lineItems si cambia catálogo (mantiene cantidades existentes)
@@ -2623,7 +2804,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
     },0);
   }
 
-  function submit(e){
+  function submit(e) {
     e.preventDefault();
     const items = lineItems.filter(i=>i.cantidad>0);
     if(!items.length){ alert('Ingresa cantidades'); return; }
@@ -2637,13 +2818,18 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
       }
     }
     if(editId){
-      // Actualizar existente (mantener status original)
-      setDispatches(prev => prev.map(d=> d.id===editId ? { ...d, fecha, ciudad, items } : d));
+      // Abrir modal de confirmación; la lógica se aplica en confirmApplyEdit()
+      setConfirmUpdateOpen(true);
+      return;
     } else {
       const record = { id: uid(), fecha, ciudad, items, status: 'pendiente' };
       setDispatches([record, ...dispatches]);
+      // Descontar stock inmediatamente (reserva)
+      setProducts(prev => prev.map(p => {
+        const it = items.find(i=>i.sku===p.sku);
+        return it ? { ...p, stock: p.stock - it.cantidad } : p;
+      }));
     }
-  // Stock se descuenta solo al confirmar
     // Reset cantidades
     setLineItems(lineItems.map(l=>({...l,cantidad:0})));
     setEditId(null);
@@ -2661,6 +2847,32 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
       const found = d.items.find(it=>it.sku===li.sku);
       return { ...li, cantidad: found? found.cantidad : 0 };
     }));
+  }
+
+  function confirmApplyEdit(){
+    const items = lineItems.filter(i=>i.cantidad>0);
+    const old = dispatches.find(d=> d.id===editId);
+    setDispatches(prev => prev.map(d=> d.id===editId ? { ...d, fecha, ciudad, items } : d));
+    if(old){
+      setProducts(prev => prev.map(p => {
+        const newIt = items.find(i=>i.sku===p.sku);
+        const oldIt = old.items.find(i=>i.sku===p.sku);
+        const newQty = newIt? newIt.cantidad : 0;
+        const oldQty = oldIt? oldIt.cantidad : 0;
+        const diff = newQty - oldQty; // si >0 reservamos más (restar), si <0 liberar
+        return diff!==0 ? { ...p, stock: p.stock - diff } : p;
+      }));
+    }
+    // Cerrar modal y reset de formulario
+    setConfirmUpdateOpen(false);
+    resetAfterSubmit();
+  }
+
+  function resetAfterSubmit(){
+    setLineItems(lineItems.map(l=>({...l,cantidad:0})));
+    setEditId(null);
+    setFecha(todayISO());
+    setCiudad(ciudades[0]);
   }
 
   // Excluir productos sintéticos de las columnas de inventario/despachos
@@ -2879,12 +3091,24 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
         </div>
       </div>
       <div className="text-[10px] text-neutral-500">MVP almacén: faltan ingresos, devoluciones y estados de envío.</div>
+      {confirmUpdateOpen && (
+        <Modal onClose={()=> setConfirmUpdateOpen(false)}>
+          <div className="space-y-4 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-[#e7922b]">Confirmar actualización</h3>
+            <p className="text-xs text-neutral-300 leading-relaxed">Se actualizará el despacho pendiente y se ajustarán las reservas de stock según los nuevos valores. ¿Continuar?</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={()=> setConfirmUpdateOpen(false)} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
+              <button onClick={confirmApplyEdit} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Aplicar cambios</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
 // Despachos pendientes para ciudad con opción de confirmar o cancelar
-function CityPendingShipments({ city, dispatches, setDispatches, products, session }) {
+function CityPendingShipments({ city, dispatches, setDispatches, products, setProducts, session }) {
   const pendientes = dispatches.filter(d=>d.ciudad===city && d.status==='pendiente');
   const [openId, setOpenId] = useState(null); // id abierto
   const [openPos, setOpenPos] = useState(null); // posición del botón lupa
@@ -2896,10 +3120,16 @@ function CityPendingShipments({ city, dispatches, setDispatches, products, sessi
   }, [openId]);
   if(!pendientes.length) return null;
   function confirmar(d){
+    // Stock ya fue descontado al crear. Solo cambiar estado.
     setDispatches(prev => prev.map(x=> x.id===d.id?{...x,status:'confirmado'}:x));
   }
   function cancelar(d){
     if(!confirm('Cancelar envío pendiente?')) return;
+    // Restaurar stock reservado
+    setProducts(prev => prev.map(p => {
+      const it = d.items.find(i=>i.sku===p.sku);
+      return it ? { ...p, stock: p.stock + it.cantidad } : p;
+    }));
     setDispatches(prev => prev.filter(x=>x.id!==d.id));
   }
   return (
@@ -4204,7 +4434,7 @@ function VentasView({ sales, setSales, products, session, dispatches, setDispatc
         </div>
         {cityFilter && (
           <>
-            <CityPendingShipments city={cityFilter} dispatches={dispatches} setDispatches={setDispatches} products={products} session={session} />
+            <CityPendingShipments city={cityFilter} dispatches={dispatches} setDispatches={setDispatches} products={products} setProducts={setProducts} session={session} />
             <CityStock city={cityFilter} products={products} sales={sales} dispatches={dispatches.filter(d=>d.status==='confirmado')} setSales={setSales} session={session} />
             <CitySummary city={cityFilter} sales={sales} setSales={setSales} products={products} session={session} setProducts={setProducts} setView={setView} setDepositSnapshots={setDepositSnapshots} />
           </>
