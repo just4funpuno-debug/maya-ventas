@@ -2890,9 +2890,33 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
             ); })()}
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={()=>{ setPriceConfirmOpen(false); pricePendingRef.current=null; }} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
-              <button onClick={()=>{
+              <button onClick={async ()=>{
                 const pending = pricePendingRef.current; if(!pending) return;
-                setProducts(prev=> prev.map(p=> p.sku===pending.sku ? { ...p, delivery: pending.delivery, precioPar: pending.precioPar } : p));
+                // Actualiza estado local inmediato
+                let prodSnapshot;
+                setProducts(prev=> prev.map(p=> {
+                  if(p.sku===pending.sku){ prodSnapshot = { ...p, delivery: pending.delivery, precioPar: pending.precioPar }; return prodSnapshot; }
+                  return p;
+                }));
+                // Persistencia inmediata (evita perder datos si el usuario presiona F5 antes del debounce)
+                try {
+                  const p = prodSnapshot || products.find(x=>x.sku===pending.sku);
+                  if(p && typeof supabase!== 'undefined' && supabase){
+                    await supabase.from('products').upsert([{
+                      id: p.id,
+                      sku: p.sku,
+                      nombre: p.nombre,
+                      precio: p.precio,
+                      costo: p.costo,
+                      stock: p.stock,
+                      imagen_url: p.imagenUrl||null,
+                      imagen_id: p.imagenId||null,
+                      sintetico: !!p.sintetico,
+                      delivery: p.delivery!=null? Number(p.delivery)||0 : null,
+                      precio_par: p.precioPar!=null? Number(p.precioPar)||0 : null
+                    }], { onConflict: 'id' });
+                  }
+                } catch(e){ console.warn('immediate price upsert', e); }
                 setPriceConfirmOpen(false); pricePendingRef.current=null;
               }} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Aplicar</button>
             </div>
