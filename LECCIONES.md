@@ -134,3 +134,29 @@ Indicador de éxito: aparición de log `[products] eliminado remoto filas: 1 <sk
 ---
 
 Mantén este archivo vivo; actualiza cada nuevo incidente.
+
+## 14. Usuarios que "resucitaban" tras eliminarlos
+
+Síntoma: En producción al eliminar un usuario desaparecía unos segundos y luego reaparecía.
+
+Raíz:
+
+1. El flujo de sincronización hacía `upsert` masivo de todos los usuarios locales (snapshot) sin distinción entre activos y eliminados.
+2. La eliminación solo quitaba del estado local; si el `delete` remoto fallaba (RLS / id desalineado) el siguiente upsert lo restauraba.
+
+Solución aplicada:
+
+- Handler `performDelete` ahora:
+  - Elimina optimistamente del estado local para feedback inmediato.
+  - Intenta `delete` por `id`; si 0 filas y hay `username`, reintenta por `username` (caso id cambiado al reconciliar).
+  - Usa `select('id')` para contar filas borradas.
+  - Si 0 filas: revierte local + alerta para revisar políticas.
+  - Logs `[users] delete ...` con `_SYNC_DEBUG`.
+
+Pendientes / mejoras futuras:
+
+- Añadir reconciliación que detecte usuarios locales inexistentes en remoto y los purgue.
+- Marcar usuarios en borrado con un tombstone temporal para evitar re-creación incluso si se reinyectan a `users` por algún error.
+- Tests E2E: crear → eliminar → confirmar no reaparición tras 2 ciclos de sync.
+
+Lección: El patrón de snapshot + upsert necesita DELETE remoto verificado y (idealmente) un mecanismo anti-resurrección (tombstones / reconciliación inversa).

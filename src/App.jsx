@@ -2031,6 +2031,7 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
   const [editingId,setEditingId]=useState(null);
   const [editData,setEditData]=useState(null);
   const [deletingUser,setDeletingUser]=useState(null);
+  const [deletingUserBusy,setDeletingUserBusy]=useState(false);
   // Registrar pagos de este mes para evitar parpadeo una vez marcado "Pagado".
   const [pagosMarcados, setPagosMarcados] = useState(()=>{
     try { return JSON.parse(localStorage.getItem('ventas.pagados')||'{}'); } catch { return {}; }
@@ -2060,7 +2061,45 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
     setConfirmEdit({ original, updated: editData, diff });
   }
   function askDelete(u){ if(u.id===session.id){ alert('No puedes eliminar tu propia sesión.'); return; } if(u.id==='admin'){ alert('No puedes eliminar el usuario administrador principal.'); return; } setDeletingUser(u); }
-  function performDelete(){ if(!deletingUser) return; setUsers(users.filter(x=>x.id!==deletingUser.id)); setDeletingUser(null); }
+  async function performDelete(){
+    if(!deletingUser) return; if(deletingUserBusy) return; setDeletingUserBusy(true);
+    const target = deletingUser; const done = ()=>{ setDeletingUserBusy(false); setDeletingUser(null); };
+    try {
+      // Eliminar local inmediatamente para UX optimista
+      setUsers(prev=> prev.filter(x=>x.id!==target.id));
+      // Intentar borrar en la nube si hay cliente supabase
+      if(window._SYNC_DEBUG) console.log('[users] delete start', target.id, target.username);
+      {
+        const sb = supabase; if(sb){
+          // 1) Intentar por id
+          let { error, data } = await sb.from('users').delete().eq('id', target.id).select('id');
+          if(error){
+            console.warn('[users] delete by id error', error);
+          }
+          let deletedCount = Array.isArray(data)? data.length : 0;
+          // 2) Si no borró nada y tenemos username, intentar por username (posible desalineación de id local)
+            if(deletedCount===0 && target.username){
+              const { error:err2, data: data2 } = await sb.from('users').delete().eq('username', target.username).select('id');
+              if(err2){ console.warn('[users] delete by username error', err2); }
+              if(Array.isArray(data2) && data2.length){ deletedCount = data2.length; }
+            }
+          if(window._SYNC_DEBUG) console.log('[users] delete remote result', deletedCount);
+          if(deletedCount===0){
+            // Revertir local si no se pudo borrar remoto (para consistencia) y avisar
+            setUsers(prev=> prev.some(u=>u.id===target.id)? prev : [...prev, target]);
+            alert('No se pudo eliminar remotamente (0 filas). Revisa políticas RLS.');
+          } else {
+            // Confirmar que no se re-suba accidentalmente: no hace falta porque ya no está en users[]
+          }
+        }
+      }
+    } catch(e){
+      console.warn('[users] delete ex', e);
+      // Restaurar local en caso de error
+      setUsers(prev=> prev.some(u=>u.id===target.id)? prev : [...prev, target]);
+      alert('Error eliminando.');
+    } finally { done(); }
+  }
   return (
     <div className="flex-1 p-6">
       <header className="mb-6">
@@ -2258,7 +2297,7 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
               <p className="text-xs text-neutral-300 leading-relaxed">¿Eliminar a <span className="font-semibold text-neutral-100">{deletingUser.nombre} {deletingUser.apellidos}</span>? Esta acción no se puede deshacer.</p>
               <div className="flex justify-end gap-2 pt-1">
                 <button onClick={()=>setDeletingUser(null)} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs">Cancelar</button>
-                <button onClick={performDelete} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold">Eliminar</button>
+                <button disabled={deletingUserBusy} onClick={performDelete} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 text-xs font-semibold">{deletingUserBusy? 'Eliminando...' : 'Eliminar'}</button>
               </div>
             </div>
           </Modal>
@@ -2373,10 +2412,7 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
       imagen: imagenBase64 || (exists ? exists.imagen : null),
       imagenUrl: imagenUrl || (exists ? exists.imagenUrl : null),
       imagenId: imagenId || (exists ? exists.imagenId : null),
-      sintetico: sintetico ? true : undefined,
-      // Preservar delivery y precioPar anteriores si ya existen (no se editan aquí)
-      delivery: exists ? exists.delivery : undefined,
-      precioPar: exists ? exists.precioPar : undefined
+      sintetico: sintetico ? true : undefined
     };
     if (exists && editingSku) {
       // abrir modal confirmación
