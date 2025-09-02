@@ -638,10 +638,14 @@ export default function App() {
       // Usar onConflict=username para que haga UPSERT por username (evita 23505)
       const sb = supabase; if(!sb) return;
       const payload = list.map(u=>({ id:u.id, username:u.username, password:u.password, nombre:u.nombre, apellidos:u.apellidos, celular:u.celular, rol:u.rol, grupo:u.grupo, fecha_ingreso:u.fechaIngreso, sueldo:u.sueldo, dia_pago:u.diaPago }));
-      const { error } = await sb.from('users').upsert(payload, { onConflict:'username' });
+      // Preferir onConflict por id (PK) para evitar intento de inserción al cambiar username existente.
+      const { error } = await sb.from('users').upsert(payload, { onConflict:'id' });
       if(error){
-        if(error.code==='23505' && window._SYNC_DEBUG) console.warn('[sync users] conflicto pese a onConflict, intentar reconciliar', error);
-        else if(error) console.warn('sync users', error);
+        if(error.code==='23505'){
+          console.warn('[sync users] conflicto (posible username duplicado). Considerar validar antes de guardar.', error);
+        } else {
+          console.warn('sync users', error);
+        }
       }
     } catch(e){ console.warn('sync users ex', e); }
   }); }, [users, usingCloud, cloudReady]);
@@ -2095,11 +2099,15 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
         const sb = supabase; if(!sb) return;
         const row = updated.find(u=>u.id===editData.id);
         if(row){
-          const payload = [{ id: row.id, username: row.username, password: row.password, nombre: row.nombre, apellidos: row.apellidos, celular: row.celular, rol: row.rol, grupo: row.grupo, fecha_ingreso: row.fechaIngreso, sueldo: row.sueldo, dia_pago: row.diaPago }];
-          const { error } = await sb.from('users').upsert(payload, { onConflict:'username' });
-          if(error) console.warn('[users] immediate upsert error', error);
+          // Update directo por id para soportar cambio de username sin conflicto de inserción
+          const updateObj = { username: row.username, password: row.password, nombre: row.nombre, apellidos: row.apellidos, celular: row.celular, rol: row.rol, grupo: row.grupo, fecha_ingreso: row.fechaIngreso, sueldo: row.sueldo, dia_pago: row.diaPago };
+          const { error } = await sb.from('users').update(updateObj).eq('id', row.id);
+          if(error){
+            if(error.code==='23505') alert('Ese usuario ya existe en la nube. Elige otro nombre.');
+            console.warn('[users] immediate update error', error);
+          }
         }
-      } catch(err){ console.warn('[users] immediate upsert ex', err); }
+      } catch(err){ console.warn('[users] immediate update ex', err); }
     })();
     setConfirmEdit(null); cancelEdit(); }
   function handleEditSubmit(e){ e.preventDefault(); if(!editData) return; if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; } const original = users.find(u=>u.id===editData.id); if(!original) { saveEdit(); return; } // diff simple
