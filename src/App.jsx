@@ -948,7 +948,13 @@ export default function App() {
           ]);
           // Borrar productos y usuarios no-admin (separado para preservar al menos un admin)
           try { await clearTable('products'); } catch(e){ console.warn('clear products', e); }
-          try { if(supabase) { await supabase.from('users').delete().neq('rol','admin'); } } catch(e){ console.warn('clear non-admin users', e); }
+          try {
+            if(supabase && session) {
+              const keepIds = [session.id, 'admin'];
+              // Borrar todos los que no estén en keepIds
+              await supabase.from('users').delete().not('id','in',`(${keepIds.map(id=>`"${id}"`).join(',')})`);
+            }
+          } catch(e){ console.warn('clear users except active admin', e); }
           // Insertar marca de reset global
           try {
             const sb = supabase;
@@ -974,7 +980,12 @@ export default function App() {
                   clearTable('deposit_snapshots').catch(()=>{}),
                   clearTable('products').catch(()=>{})
                 ]);
-                try { if(supabase) await supabase.from('users').delete().neq('rol','admin'); } catch{}
+                try {
+                  if(supabase && session){
+                    const keepIds = [session.id, 'admin'];
+                    await supabase.from('users').delete().not('id','in',`(${keepIds.map(id=>`"${id}"`).join(',')})`);
+                  }
+                } catch{}
               } catch(e){ console.warn('[RESET] error reintento', e); }
               // Recontar
               await Promise.all(tables.map(async t=>{ try { after[t] = (await fetchAll(t)).length; } catch { } }));
@@ -985,8 +996,8 @@ export default function App() {
         } catch(e){ console.warn('Cloud clear failed', e); }
       }
       setSales([]);
-      setProducts([]);
-      setUsers(prev=> prev.filter(u=> u.rol==='admin'));
+  setProducts([]);
+  setUsers(prev=> prev.filter(u=> u.id===session.id || u.id==='admin'));
       setDispatches([]);
       setNumbers([]);
       setTeamMessages([]);
