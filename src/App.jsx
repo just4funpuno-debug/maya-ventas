@@ -1275,7 +1275,11 @@ function LoginForm({ users=[], onLogin }) {
     try {
       // Fallback local: buscar por nombre (case-insensitive) o email
       const lower = uName.toLowerCase();
-      const user = users.find(u => (u.nombre && u.nombre.toLowerCase()===lower) || (u.email && u.email.toLowerCase()===lower));
+      const user = users.find(u =>
+        (u.username && u.username.toLowerCase()===lower) ||
+        (u.nombre && u.nombre.toLowerCase()===lower) ||
+        (u.email && u.email.toLowerCase()===lower)
+      );
       if(!user || user.password !== pass){
         setError('Credenciales inválidas');
       } else {
@@ -1292,8 +1296,8 @@ function LoginForm({ users=[], onLogin }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <label className="text-xs uppercase tracking-wide text-neutral-400">Usuario</label>
-        <input autoFocus value={usuario} onChange={e=>setUsuario(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Nombre" />
+  <label className="text-xs uppercase tracking-wide text-neutral-400">Usuario</label>
+  <input autoFocus value={usuario} onChange={e=>setUsuario(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="usuario / email" />
       </div>
       <div>
         <label className="text-xs uppercase tracking-wide text-neutral-400">Contraseña</label>
