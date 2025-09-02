@@ -646,6 +646,36 @@ export default function App() {
     } catch(e){ console.warn('sync users ex', e); }
   }); }, [users, usingCloud, cloudReady]);
 
+  // Realtime users (para que otras pestañas reflejen cambios y evitar sobrescrituras ciegas)
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return;
+    try {
+      const mapRow = r=> ({ id:r.id, username:r.username, password:r.password||'', nombre:r.nombre, apellidos:r.apellidos, celular:r.celular, rol:r.rol, grupo:r.grupo, fechaIngreso:r.fecha_ingreso, sueldo:Number(r.sueldo||0), diaPago:r.dia_pago });
+      const channel = supabase.channel('users_changes')
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'users' }, (payload)=>{
+          const row = mapRow(payload.new||{});
+          setUsers(prev=>{
+            if(pendingUserEditsRef.current.has(row.id)) return prev; // no pisar edición local reciente
+            if(prev.some(u=>u.id===row.id || u.username===row.username)) return prev.map(u=> (u.id===row.id || u.username===row.username)? { ...u, ...row }: u);
+            return [...prev, normalizeUser(row)];
+          });
+        })
+        .on('postgres_changes', { event:'UPDATE', schema:'public', table:'users' }, (payload)=>{
+          const row = mapRow(payload.new||{});
+          setUsers(prev=>{
+            if(pendingUserEditsRef.current.has(row.id)) return prev; // proteger edición local
+            return prev.map(u=> (u.id===row.id || u.username===row.username)? { ...u, ...row } : u);
+          });
+        })
+        .on('postgres_changes', { event:'DELETE', schema:'public', table:'users' }, (payload)=>{
+          const oldId = payload.old?.id; const oldUsername = payload.old?.username;
+          setUsers(prev=> prev.filter(u=> u.id!==oldId && u.username!==oldUsername));
+        })
+        .subscribe();
+      return ()=>{ try { supabase.removeChannel(channel); } catch{} };
+    } catch(e){ console.warn('users realtime error', e); }
+  }, [usingCloud, cloudReady]);
+
   // Reconciliación de IDs por username (si local y remoto difieren genera 23505 al intentar insertar nuevo id)
   useEffect(()=>{
     if(!usingCloud || !cloudReady) return; // esperar fetch inicial
@@ -2058,7 +2088,20 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
     const updated=users.map(u=> u.id===editData.id? normalizeUser({ ...u, ...editData, grupo: editData.rol==='admin'? '' : (editData.grupo||''), username: editData.email, diaPago:Number(editData.diaPago), sueldo:Number(editData.sueldo||0), productos: editData.rol==='admin'? [] : (editData.productos||[]) }) : u);
     // Marcar edición pendiente para proteger contra overwrite remoto inmediato
     try { pendingUserEditsRef.current.add(editData.id); setTimeout(()=> pendingUserEditsRef.current.delete(editData.id), 5000); } catch {}
-    setUsers(updated); setConfirmEdit(null); cancelEdit(); }
+    setUsers(updated);
+    // Push inmediato (no esperar debounce) para que el remoto refleje antes de que otro pull lo sobrescriba
+    (async()=>{
+      try {
+        const sb = supabase; if(!sb) return;
+        const row = updated.find(u=>u.id===editData.id);
+        if(row){
+          const payload = [{ id: row.id, username: row.username, password: row.password, nombre: row.nombre, apellidos: row.apellidos, celular: row.celular, rol: row.rol, grupo: row.grupo, fecha_ingreso: row.fechaIngreso, sueldo: row.sueldo, dia_pago: row.diaPago }];
+          const { error } = await sb.from('users').upsert(payload, { onConflict:'username' });
+          if(error) console.warn('[users] immediate upsert error', error);
+        }
+      } catch(err){ console.warn('[users] immediate upsert ex', err); }
+    })();
+    setConfirmEdit(null); cancelEdit(); }
   function handleEditSubmit(e){ e.preventDefault(); if(!editData) return; if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; } const original = users.find(u=>u.id===editData.id); if(!original) { saveEdit(); return; } // diff simple
     const fields = ['nombre','apellidos','celular','email','password','rol','grupo','fechaIngreso','diaPago','sueldo'];
     const diff = fields.map(f=>{ const newVal = f==='email'? editData.email : editData[f]; const oldVal = f==='email'? (original.username||original.email) : (original[f]); if(String(newVal) !== String(oldVal||'')) return { campo:f, antes:String(oldVal||''), despues:String(newVal||'') }; return null; }).filter(Boolean);
