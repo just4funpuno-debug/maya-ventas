@@ -2351,19 +2351,24 @@ function ProductsView({ products, setProducts, session }) {
   const hasCloud = !!supabase; // no depende de cloudReady aquí para evitar ReferenceError
     if(hasCloud){
       try {
-        let query = supabase.from('products').delete();
-        if(p.id) query = query.eq('id', p.id); else query = query.eq('sku', p.sku);
-        let { error, count } = await query;
-        if(!error && (!count || count===0) && p.sku){
-          // Fallback: intentar por sku si por id no borró nada
-            const res2 = await supabase.from('products').delete().eq('sku', p.sku);
-            if(res2.error) error = res2.error; else count = (res2.count||0);
+        // Intento 1: borrar por id (si existe) devolviendo filas afectadas
+        let affected = 0; let lastError=null;
+        if(p.id){
+          const { data:del1, error:err1 } = await supabase.from('products').delete().eq('id', p.id).select('id');
+          if(err1){ lastError=err1; console.warn('[products] delete por id error', err1); }
+          else affected = (del1||[]).length;
         }
-        if(error){
-          console.warn('[products] fallo delete remoto', error);
-          alert('No se pudo borrar en la nube (queda local). Reintenta.');
+        // Fallback / alternativa: si no afectó nada, intentar por sku
+        if(affected===0 && p.sku){
+          const { data:del2, error:err2 } = await supabase.from('products').delete().eq('sku', p.sku).select('id');
+            if(err2){ lastError = err2; console.warn('[products] delete por sku error', err2); }
+            else affected += (del2||[]).length;
+        }
+        if(affected===0){
+          console.warn('[products] no se borró ninguna fila (id/sku no coincidieron)', { id:p.id, sku:p.sku, lastError });
+          alert('No se encontró el producto en la nube para borrar. Puede que ya no exista o haya desincronización.');
         } else {
-          if(typeof __DBG!=='undefined' && __DBG) console.log('[products] eliminado remoto', p.sku);
+          if(typeof __DBG!=='undefined' && __DBG) console.log('[products] eliminado remoto filas:', affected, p.sku);
           if(p.imagenId){ import('./cloudinary.js').then(m=> m.deleteProductImage?.(p.imagenId)); }
           localUpdate();
         }
