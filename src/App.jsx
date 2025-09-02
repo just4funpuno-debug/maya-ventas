@@ -2348,7 +2348,7 @@ function ProductsView({ products, setProducts, session }) {
       setProducts(prev=> prev.filter(x => x.sku !== p.sku));
       if (editingSku === p.sku) resetForm();
     };
-    const hasCloud = !!supabase && cloudReady; // evita ReferenceError si usingCloud no está en este closure
+  const hasCloud = !!supabase; // no depende de cloudReady aquí para evitar ReferenceError
     if(hasCloud){
       try {
         let query = supabase.from('products').delete();
