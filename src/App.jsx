@@ -950,9 +950,25 @@ export default function App() {
           try { await clearTable('products'); } catch(e){ console.warn('clear products', e); }
           try {
             if(supabase && session) {
-              const keepIds = [session.id, 'admin'];
-              // Borrar todos los que no estén en keepIds
-              await supabase.from('users').delete().not('id','in',`(${keepIds.map(id=>`"${id}"`).join(',')})`);
+              const keepIds = new Set([session.id, 'admin']);
+              const { data:allUsers, error:fetchUsersErr } = await supabase.from('users').select('id,rol,username');
+              if(fetchUsersErr) throw fetchUsersErr;
+              const targets = (allUsers||[]).filter(u=> !keepIds.has(u.id)).map(u=>u.id);
+              if(targets.length){
+                const { error:delErr } = await supabase.from('users').delete().in('id', targets);
+                if(delErr){
+                  console.warn('[reset] primer intento delete usuarios falló', delErr);
+                  // Fallback: si fallo quizá por RLS (rol='admin'), intentar bajar el rol y volver a borrar individualmente
+                  const leftover = await supabase.from('users').select('id,rol').in('id', targets);
+                  const still = (leftover.data||[]).map(u=>u.id);
+                  for(const uid of still){
+                    try {
+                      await supabase.from('users').update({ rol:'seller' }).eq('id', uid);
+                      await supabase.from('users').delete().eq('id', uid);
+                    } catch(eu){ console.warn('[reset] fallback delete usuario', uid, eu); }
+                  }
+                }
+              }
             }
           } catch(e){ console.warn('clear users except active admin', e); }
           // Insertar marca de reset global
@@ -982,8 +998,17 @@ export default function App() {
                 ]);
                 try {
                   if(supabase && session){
-                    const keepIds = [session.id, 'admin'];
-                    await supabase.from('users').delete().not('id','in',`(${keepIds.map(id=>`"${id}"`).join(',')})`);
+                    const keepIds = new Set([session.id,'admin']);
+                    const { data:rem, error:remErr } = await supabase.from('users').select('id,rol');
+                    if(!remErr){
+                      const left = (rem||[]).filter(u=> !keepIds.has(u.id));
+                      for(const u of left){
+                        try {
+                          if(u.rol==='admin'){ await supabase.from('users').update({ rol:'seller' }).eq('id', u.id); }
+                          await supabase.from('users').delete().eq('id', u.id);
+                        } catch(eu){ console.warn('[reset] retry per-user delete', u.id, eu); }
+                      }
+                    }
                   }
                 } catch{}
               } catch(e){ console.warn('[RESET] error reintento', e); }
