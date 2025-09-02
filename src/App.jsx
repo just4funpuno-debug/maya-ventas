@@ -357,6 +357,8 @@ export default function App() {
   // Estado para "Mis Números"
   const [numbers, setNumbers] = useState(()=> loadLS(LS_KEYS.numeros, [])); // [{id, sku, email, celular, caduca, createdAt}]
   const [teamMessages, setTeamMessages] = useState(()=> loadLS(LS_KEYS.teamMessages, [])); // [{id, grupo, authorId, authorNombre, text, createdAt, readBy:[] }]
+  // Marca temporal de usuarios recientemente editados (para evitar que la carga inicial o un pull rápido sobrescriba cambios locales antes del push)
+  const pendingUserEditsRef = useRef(new Set());
   const [view, setView] = useState(()=>{
     try { return localStorage.getItem('ui.view') || 'dashboard'; } catch { return 'dashboard'; }
   }); // 'dashboard' | 'historial' | 'ventas' | 'register-sale' | 'almacen' | 'create-user' | 'products' | 'mis-numeros' | 'config'
@@ -502,14 +504,16 @@ export default function App() {
           const map=new Map(prev.map(x=>[x.id,x]));
           u.forEach(r=>{
             const existing = map.get(r.id);
-            // Mantener password local si en la nube está null/'' (migración hacia Auth)
+            if(existing && pendingUserEditsRef.current.has(r.id)){
+              if(window._SYNC_DEBUG) console.log('[users] skip remote overwrite (recent local edit)', r.id);
+              return; // evitar sobreescritura inmediata
+            }
             const mergedPassword = r.password ? r.password : (existing?.password || '');
             map.set(r.id, normalizeUser({ id:r.id, username:r.username, password: mergedPassword, nombre:r.nombre, apellidos:r.apellidos, celular:r.celular, rol:r.rol, grupo:r.grupo, fechaIngreso:r.fecha_ingreso, sueldo:Number(r.sueldo||0), diaPago:r.dia_pago }));
           });
-          // Asegurar existencia de pedroadmin incluso si no viene de Supabase todavía
-          if(!Array.from(map.values()).some(u=>u.username==='pedroadmin')){
-            map.set('admin2', normalizeUser({ id: 'admin2', nombre:'Pedro', apellidos:'Admin', username:'pedroadmin', password:'pedro123', rol:'admin', productos:[], grupo:'A', fechaIngreso: todayISO(), fechaPago: todayISO(), sueldo:0 }));
-          }
+            if(!Array.from(map.values()).some(u=>u.username==='pedroadmin')){
+              map.set('admin2', normalizeUser({ id: 'admin2', nombre:'Pedro', apellidos:'Admin', username:'pedroadmin', password:'pedro123', rol:'admin', productos:[], grupo:'A', fechaIngreso: todayISO(), fechaPago: todayISO(), sueldo:0 }));
+            }
           return Array.from(map.values());
         });
         if(s.length) setSales(prev=>{
@@ -2050,7 +2054,11 @@ function CreateUserAdmin({ users, setUsers, session, products }) {
     setEditData({ ...u, email: u.username || u.email || '', sueldo:String(u.sueldo), diaPago: legacyDia });
   }
   function cancelEdit(){ setEditingId(null); setEditData(null); }
-  function saveEdit(e){ if(e) e.preventDefault(); if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; } const updated=users.map(u=> u.id===editData.id? normalizeUser({ ...u, ...editData, grupo: editData.rol==='admin'? '' : (editData.grupo||''), username: editData.email, diaPago:Number(editData.diaPago), sueldo:Number(editData.sueldo||0), productos: editData.rol==='admin'? [] : (editData.productos||[]) }) : u); setUsers(updated); setConfirmEdit(null); cancelEdit(); }
+  function saveEdit(e){ if(e) e.preventDefault(); if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; }
+    const updated=users.map(u=> u.id===editData.id? normalizeUser({ ...u, ...editData, grupo: editData.rol==='admin'? '' : (editData.grupo||''), username: editData.email, diaPago:Number(editData.diaPago), sueldo:Number(editData.sueldo||0), productos: editData.rol==='admin'? [] : (editData.productos||[]) }) : u);
+    // Marcar edición pendiente para proteger contra overwrite remoto inmediato
+    try { pendingUserEditsRef.current.add(editData.id); setTimeout(()=> pendingUserEditsRef.current.delete(editData.id), 5000); } catch {}
+    setUsers(updated); setConfirmEdit(null); cancelEdit(); }
   function handleEditSubmit(e){ e.preventDefault(); if(!editData) return; if(!editData.nombre||!editData.apellidos||!editData.email) return; if(!editData.diaPago || editData.diaPago<1 || editData.diaPago>31){ alert('Día de pago inválido'); return; } if(users.some(u=>u.username===editData.email && u.id!==editData.id)){ alert('Usuario ya usado'); return; } const original = users.find(u=>u.id===editData.id); if(!original) { saveEdit(); return; } // diff simple
     const fields = ['nombre','apellidos','celular','email','password','rol','grupo','fechaIngreso','diaPago','sueldo'];
     const diff = fields.map(f=>{ const newVal = f==='email'? editData.email : editData[f]; const oldVal = f==='email'? (original.username||original.email) : (original[f]); if(String(newVal) !== String(oldVal||'')) return { campo:f, antes:String(oldVal||''), despues:String(newVal||'') }; return null; }).filter(Boolean);
