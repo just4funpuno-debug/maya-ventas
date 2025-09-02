@@ -2348,16 +2348,22 @@ function ProductsView({ products, setProducts, session }) {
       setProducts(prev=> prev.filter(x => x.sku !== p.sku));
       if (editingSku === p.sku) resetForm();
     };
-    // Borrar nube primero para evitar resurrección por Realtime/remoto
-    if(usingCloud && cloudReady && supabase){
+    const hasCloud = !!supabase && cloudReady; // evita ReferenceError si usingCloud no está en este closure
+    if(hasCloud){
       try {
-        const { error } = await supabase.from('products').delete().eq('id', p.id);
+        let query = supabase.from('products').delete();
+        if(p.id) query = query.eq('id', p.id); else query = query.eq('sku', p.sku);
+        let { error, count } = await query;
+        if(!error && (!count || count===0) && p.sku){
+          // Fallback: intentar por sku si por id no borró nada
+            const res2 = await supabase.from('products').delete().eq('sku', p.sku);
+            if(res2.error) error = res2.error; else count = (res2.count||0);
+        }
         if(error){
           console.warn('[products] fallo delete remoto', error);
           alert('No se pudo borrar en la nube (queda local). Reintenta.');
         } else {
           if(typeof __DBG!=='undefined' && __DBG) console.log('[products] eliminado remoto', p.sku);
-          // Intentar borrar imagen en Cloudinary si existe
           if(p.imagenId){ import('./cloudinary.js').then(m=> m.deleteProductImage?.(p.imagenId)); }
           localUpdate();
         }
@@ -2366,7 +2372,6 @@ function ProductsView({ products, setProducts, session }) {
         alert('Error al borrar en la nube.');
       }
     } else {
-      // Sin nube: sólo local
       if(p.imagenId){ import('./cloudinary.js').then(m=> m.deleteProductImage?.(p.imagenId)); }
       localUpdate();
     }
