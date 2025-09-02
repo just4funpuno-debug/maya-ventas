@@ -2444,12 +2444,28 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
   const [optimizing, setOptimizing] = useState(false);
   const [confirmUpdateOpen, setConfirmUpdateOpen] = useState(false);
   const pendingUpdateRef = useRef(null);
-  // Edición de delivery / precio por par
-  const [priceEditSku, setPriceEditSku] = useState(null);
-  const [priceDraftDelivery, setPriceDraftDelivery] = useState('');
-  const [priceDraftPrecioPar, setPriceDraftPrecioPar] = useState('');
-  const [priceConfirmOpen, setPriceConfirmOpen] = useState(false);
-  const pricePendingRef = useRef(null);
+  // Edición inline delivery / precio por par (reemplaza modales previos)
+  const priceDraftsRef = useRef({}); // { sku: { delivery, precioPar } }
+  const [, forcePriceDraftTick] = useState(0);
+  const setPriceDraft = (sku, field, value)=>{ priceDraftsRef.current[sku] = { ...(priceDraftsRef.current[sku]||{}), [field]: value }; forcePriceDraftTick(x=>x+1); };
+  const applyInlinePrice = async (sku)=>{
+    const draft = priceDraftsRef.current[sku]||{}; let d=draft.delivery; let pr=draft.precioPar;
+    if(d==='') d=undefined; if(pr==='') pr=undefined;
+    if(d!=null){ d=Number(d); if(isNaN(d)||d<0) d=undefined; }
+    if(pr!=null){ pr=Number(pr); if(isNaN(pr)||pr<0) pr=undefined; }
+    let snapshot;
+    setProducts(prev=> prev.map(p=>{ if(p.sku===sku){ snapshot={...p, delivery:d, precioPar:pr}; return snapshot; } return p; }));
+    try {
+      const p = snapshot || products.find(x=>x.sku===sku);
+      if(p && supabase){
+        await supabase.from('products').upsert([{
+          id:p.id, sku:p.sku, nombre:p.nombre, precio:p.precio, costo:p.costo, stock:p.stock,
+          imagen_url:p.imagenUrl||null, imagen_id:p.imagenId||null, sintetico:!!p.sintetico,
+          delivery: p.delivery!=null?Number(p.delivery)||0:null, precio_par:p.precioPar!=null?Number(p.precioPar)||0:null
+        }], { onConflict:'id' });
+      }
+    } catch(e){ console.warn('inline price upsert', e); }
+  };
   // Productos recién agregados (gracia contra reconciliación prematura)
   const recentProductsRef = useRef(new Set());
 
@@ -2797,14 +2813,22 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
                           <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Pend.<br/><span className={pend>0?'text-yellow-400 font-semibold':'text-neutral-200'}>{pend}</span></div>
                           <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Ciudades<br/><span className="text-neutral-200 font-semibold">{city}</span></div>
                         </div>
-                        <div className="mt-2 text-[10px] text-neutral-400 flex flex-wrap gap-4 items-center">
-                          <span>Delivery: <b className="text-neutral-200">{p.delivery ?? '-'}</b></span>
-                          <span>Precio/par: <b className="text-neutral-200">{p.precioPar ?? '-'}</b></span>
-                          <button
-                            className="ml-auto text-[10px] underline text-neutral-400 hover:text-white"
-                            onClick={()=>{ setPriceEditSku(p.sku); setPriceDraftDelivery(p.delivery ?? ''); setPriceDraftPrecioPar(p.precioPar ?? ''); }}
-                          >Editar</button>
-                        </div>
+                        {(() => { const draft = priceDraftsRef.current[p.sku]||{}; const deliveryVal = draft.delivery!==undefined?draft.delivery:(p.delivery??''); const precioVal = draft.precioPar!==undefined?draft.precioPar:(p.precioPar??''); const dirty = (
+                          (deliveryVal!=='' && Number(deliveryVal||0)!==Number(p.delivery||0)) || (deliveryVal==='' && p.delivery!=null) ||
+                          (precioVal!=='' && Number(precioVal||0)!==Number(p.precioPar||0)) || (precioVal==='' && p.precioPar!=null)
+                        ); return (
+                          <div className="mt-2 text-[10px] text-neutral-300 flex flex-wrap gap-2 items-end">
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[9px] uppercase tracking-wide text-neutral-500">Delivery</label>
+                              <input type="number" min="0" value={deliveryVal} onChange={e=> setPriceDraft(p.sku,'delivery', e.target.value)} className="w-20 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[9px] uppercase tracking-wide text-neutral-500">Precio/par</label>
+                              <input type="number" min="0" step="0.01" value={precioVal} onChange={e=> setPriceDraft(p.sku,'precioPar', e.target.value)} className="w-24 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
+                            </div>
+                            <button disabled={!dirty} onClick={()=> applyInlinePrice(p.sku)} className={"ml-auto px-3 h-7 mt-5 rounded text-[10px] font-semibold "+(dirty?"bg-[#e7922b] text-[#1a2430] hover:brightness-110":"bg-neutral-700 text-neutral-500 cursor-not-allowed")}>{dirty? '✔ Guardar':'OK'}</button>
+                          </div>
+                        ); })()}
                         {(() => { const delivery=Number(p.delivery||0); const precio=Number(p.precioPar||0); const totalPV = (precio>0)? ((precio - delivery) * pares) : 0; return (
                           <div className="mt-1 text-[10px] text-neutral-400 flex items-center justify-between">
                             <span className="uppercase tracking-wide">TOTAL POR VENDER</span>
@@ -2832,97 +2856,7 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
           </div>
         </Modal>
       )}
-      {priceEditSku && (
-        <Modal onClose={()=> setPriceEditSku(null)}>
-          <div className="space-y-4 w-full max-w-xs">
-            <h3 className="text-sm font-semibold text-[#e7922b]">Editar Delivery / Precio</h3>
-            <div className="space-y-3 text-[12px]">
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-neutral-500 mb-1">Delivery</label>
-                <input type="number" min="0" value={priceDraftDelivery} onChange={e=> setPriceDraftDelivery(e.target.value)} className="w-full bg-neutral-800 rounded px-3 py-2" />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-neutral-500 mb-1">Precio por par</label>
-                <input type="number" min="0" step="0.01" value={priceDraftPrecioPar} onChange={e=> setPriceDraftPrecioPar(e.target.value)} className="w-full bg-neutral-800 rounded px-3 py-2" />
-              </div>
-              {(() => { const p=products.find(x=>x.sku===priceEditSku); if(!p) return null; const totalProd=(Number(p.stock||0)+( (dispatches.filter(d=>d.status==='pendiente').flatMap(d=>d.items).filter(i=>i.sku===p.sku).reduce((a,b)=>a+Number(b.cantidad||0),0)) ) + 0); const pares=Math.floor((Number(p.stock||0)+( (dispatches.filter(d=>d.status==='pendiente').flatMap(d=>d.items).filter(i=>i.sku===p.sku).reduce((a,b)=>a+Number(b.cantidad||0),0)) ) )/2); const delivery=Number(priceDraftDelivery||0); const precio=Number(priceDraftPrecioPar||0); const totalPV=(precio>0)? ((precio-delivery)*pares):0; return <div className="text-[10px] text-neutral-400">Previsualización TOTAL POR VENDER: <span className="text-[#e7922b] font-semibold">{totalPV.toFixed(2)}</span></div>; })()}
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={()=> setPriceEditSku(null)} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
-              <button onClick={()=>{
-                if(!priceEditSku) return; const d=priceDraftDelivery===''?undefined:Number(priceDraftDelivery); const pr=priceDraftPrecioPar===''?undefined:Number(priceDraftPrecioPar);
-                if((d!=null && d<0) || (pr!=null && pr<0)) return;
-                // Guardar en ref y abrir confirmación
-                pricePendingRef.current = { sku: priceEditSku, delivery: d, precioPar: pr };
-                setPriceEditSku(null);
-                setPriceConfirmOpen(true);
-              }} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Guardar</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {priceConfirmOpen && (
-        <Modal onClose={()=>{ setPriceConfirmOpen(false); pricePendingRef.current=null; }}>
-          <div className="space-y-4 w-full max-w-sm">
-            <h3 className="text-sm font-semibold text-[#e7922b]">Confirmar cambios</h3>
-            {(() => { const pending = pricePendingRef.current; if(!pending) return null; const prod = products.find(p=>p.sku===pending.sku); return (
-              <div className="text-[12px] text-neutral-300 space-y-2">
-                <div>Producto: <span className="font-semibold text-neutral-100">{prod?prod.nombre:pending.sku}</span></div>
-                <div className="grid grid-cols-2 gap-3 text-[11px]">
-                  <div className="bg-neutral-800/60 p-2 rounded">
-                    <div className="text-neutral-400">Delivery actual</div>
-                    <div className="font-mono">{prod && prod.delivery!=null?prod.delivery:'-'}</div>
-                  </div>
-                  <div className="bg-neutral-800/60 p-2 rounded">
-                    <div className="text-neutral-400">Delivery nuevo</div>
-                    <div className="font-mono text-[#e7922b]">{pending.delivery!=null?pending.delivery:'-'}</div>
-                  </div>
-                  <div className="bg-neutral-800/60 p-2 rounded">
-                    <div className="text-neutral-400">Precio actual</div>
-                    <div className="font-mono">{prod && prod.precioPar!=null?prod.precioPar:'-'}</div>
-                  </div>
-                  <div className="bg-neutral-800/60 p-2 rounded">
-                    <div className="text-neutral-400">Precio nuevo</div>
-                    <div className="font-mono text-[#e7922b]">{pending.precioPar!=null?pending.precioPar:'-'}</div>
-                  </div>
-                </div>
-              </div>
-            ); })()}
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={()=>{ setPriceConfirmOpen(false); pricePendingRef.current=null; }} className="px-3 py-2 rounded-lg bg-neutral-700 text-xs">Cancelar</button>
-              <button onClick={async ()=>{
-                const pending = pricePendingRef.current; if(!pending) return;
-                // Actualiza estado local inmediato
-                let prodSnapshot;
-                setProducts(prev=> prev.map(p=> {
-                  if(p.sku===pending.sku){ prodSnapshot = { ...p, delivery: pending.delivery, precioPar: pending.precioPar }; return prodSnapshot; }
-                  return p;
-                }));
-                // Persistencia inmediata (evita perder datos si el usuario presiona F5 antes del debounce)
-                try {
-                  const p = prodSnapshot || products.find(x=>x.sku===pending.sku);
-                  if(p && typeof supabase!== 'undefined' && supabase){
-                    await supabase.from('products').upsert([{
-                      id: p.id,
-                      sku: p.sku,
-                      nombre: p.nombre,
-                      precio: p.precio,
-                      costo: p.costo,
-                      stock: p.stock,
-                      imagen_url: p.imagenUrl||null,
-                      imagen_id: p.imagenId||null,
-                      sintetico: !!p.sintetico,
-                      delivery: p.delivery!=null? Number(p.delivery)||0 : null,
-                      precio_par: p.precioPar!=null? Number(p.precioPar)||0 : null
-                    }], { onConflict: 'id' });
-                  }
-                } catch(e){ console.warn('immediate price upsert', e); }
-                setPriceConfirmOpen(false); pricePendingRef.current=null;
-              }} className="px-4 py-2 rounded-lg bg-[#e7922b] text-[#1a2430] text-xs font-semibold">Aplicar</button>
-            </div>
-          </div>
-        </Modal>
-      )}
+  {/* Modales de edición de delivery / precio eliminados: edición inline */}
     </div>
   );
 }
