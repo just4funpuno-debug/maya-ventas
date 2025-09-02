@@ -583,14 +583,19 @@ export default function App() {
       if(stop) return;
       try {
         const sb = supabase; if(!sb) return;
-        const { data, error } = await sb.from('products').select('id,sku');
+  const { data, error } = await sb.from('products').select('id,sku,delivery,precio_par');
         if(!error && Array.isArray(data)){
           const remoteIds = new Set(data.map(r=>r.id));
           const remoteSkus = new Set(data.map(r=>r.sku));
           setProducts(prev=> prev.filter(p=> {
-            // proteger productos recién creados (si ya definimos recentProductsRef global la usamos)
+            // proteger productos recién creados
             try { if(recentProductsRef?.current && (recentProductsRef.current.has(p.id) || recentProductsRef.current.has(p.sku))) return true; } catch{}
-            return remoteIds.has(p.id) || remoteSkus.has(p.sku);
+            const existsRemote = remoteIds.has(p.id) || remoteSkus.has(p.sku);
+            if(!existsRemote){
+              // Si el producto tiene delivery o precioPar definidos localmente, no eliminar todavía (puede ser que la nube no haya sincronizado aún)
+              if(p.delivery!=null || p.precioPar!=null) return true;
+            }
+            return existsRemote;
           }));
         }
       } catch(e){ /* ignore network */ }
@@ -2466,6 +2471,15 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
       }
     } catch(e){ console.warn('inline price upsert', e); }
   };
+
+  // Inicializar drafts con valores existentes (solo una vez)
+  useEffect(()=>{
+    products.forEach(p=>{
+      if(!priceDraftsRef.current[p.sku]){
+        priceDraftsRef.current[p.sku] = { delivery: p.delivery ?? '', precioPar: p.precioPar ?? '' };
+      }
+    });
+  }, [products]);
   // Productos recién agregados (gracia contra reconciliación prematura)
   const recentProductsRef = useRef(new Set());
 
