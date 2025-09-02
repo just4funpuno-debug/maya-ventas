@@ -310,6 +310,15 @@ export default function App() {
   // --- Supabase sync flags ---
   const [cloudReady, setCloudReady] = useState(false); // loaded initial snapshot from Supabase
   const usingCloud = !!supabase; // environment provided
+  // Exponer para debug manual
+  if(typeof window !== 'undefined'){ window.__SB = supabase; window.__USING_CLOUD = usingCloud; }
+  useEffect(()=>{
+    if(!usingCloud){
+      console.warn('[reset-sync] usingCloud=false (Supabase no configurado). Faltan VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY en build?');
+    } else {
+      console.info('[reset-sync] usingCloud=true (Supabase client activo)');
+    }
+  }, [usingCloud]);
 
   const [products, setProducts] = useState(() => loadLS(LS_KEYS.products, seedProducts));
   const [users, setUsers] = useState(() => {
