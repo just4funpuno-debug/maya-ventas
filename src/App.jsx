@@ -497,7 +497,7 @@ export default function App() {
         ]);
         if(p.length) setProducts(prev=>{
           const map=new Map(prev.map(x=>[x.id,x]));
-          p.forEach(r=>{ map.set(r.id,{ id:r.id, sku:r.sku, nombre:r.nombre, precio:Number(r.precio||0), costo:Number(r.costo||0), stock:Number(r.stock||0), imagenUrl:r.imagen_url, imagenId:r.imagen_id, sintetico:r.sintetico }); });
+          p.forEach(r=>{ map.set(r.id,{ id:r.id, sku:r.sku, nombre:r.nombre, precio:Number(r.precio||0), costo:Number(r.costo||0), stock:Number(r.stock||0), imagenUrl:r.imagen_url, imagenId:r.imagen_id, sintetico:r.sintetico, delivery: r.delivery!=null? Number(r.delivery)||0 : null, precioPar: r.precio_par!=null? Number(r.precio_par)||0 : null }); });
           return Array.from(map.values());
         });
         if(u.length) setUsers(prev=>{
@@ -572,7 +572,7 @@ export default function App() {
     debounceRef.current[key] = setTimeout(fn, 800);
   }
   useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('products', async()=>{
-    try { await upsert('products', products.map(p=>({ id:p.id, sku:p.sku, nombre:p.nombre, precio:p.precio, costo:p.costo, stock:p.stock, imagen_url:p.imagenUrl||null, imagen_id:p.imagenId||null, sintetico:!!p.sintetico }))); } catch(e){ console.warn('sync products', e); }
+  try { await upsert('products', products.map(p=>({ id:p.id, sku:p.sku, nombre:p.nombre, precio:p.precio, costo:p.costo, stock:p.stock, imagen_url:p.imagenUrl||null, imagen_id:p.imagenId||null, sintetico:!!p.sintetico, delivery: p.delivery!=null? Number(p.delivery)||0 : null, precio_par: p.precioPar!=null? Number(p.precioPar)||0 : null }))); } catch(e){ console.warn('sync products', e); }
   }); }, [products, usingCloud, cloudReady]);
 
   // Reconciliación periódica: elimina localmente productos que ya no existen en la nube (evita "resurrección")
@@ -605,7 +605,7 @@ export default function App() {
     if(!usingCloud || !cloudReady) return; // sólo en modo nube
     try {
       if(!supabase) return;
-      const mapRow = (r)=> ({ id:r.id, sku:r.sku, nombre:r.nombre, precio:r.precio, costo:r.costo, stock:r.stock, imagenUrl:r.imagen_url||null, imagenId:r.imagen_id||null, sintetico:!!r.sintetico });
+  const mapRow = (r)=> ({ id:r.id, sku:r.sku, nombre:r.nombre, precio:r.precio, costo:r.costo, stock:r.stock, imagenUrl:r.imagen_url||null, imagenId:r.imagen_id||null, sintetico:!!r.sintetico, delivery: r.delivery!=null? Number(r.delivery)||0 : null, precioPar: r.precio_par!=null? Number(r.precio_par)||0 : null });
       const channel = supabase.channel('products_changes')
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'products' }, (payload)=>{
           const row = mapRow(payload.new||{});
