@@ -2827,22 +2827,47 @@ function ProductsView({ products, setProducts, session, dispatches=[], sales=[] 
                           <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Pend.<br/><span className={pend>0?'text-yellow-400 font-semibold':'text-neutral-200'}>{pend}</span></div>
                           <div className="rounded bg-neutral-900/60 px-2 py-1 text-[10px] text-neutral-400">Ciudades<br/><span className="text-neutral-200 font-semibold">{city}</span></div>
                         </div>
-                        {(() => { const draft = priceDraftsRef.current[p.sku]||{}; const deliveryVal = draft.delivery!==undefined?draft.delivery:(p.delivery??''); const precioVal = draft.precioPar!==undefined?draft.precioPar:(p.precioPar??''); const dirty = (
-                          (deliveryVal!=='' && Number(deliveryVal||0)!==Number(p.delivery||0)) || (deliveryVal==='' && p.delivery!=null) ||
-                          (precioVal!=='' && Number(precioVal||0)!==Number(p.precioPar||0)) || (precioVal==='' && p.precioPar!=null)
-                        ); return (
-                          <div className="mt-2 text-[10px] text-neutral-300 flex flex-wrap gap-2 items-end">
-                            <div className="flex flex-col gap-1">
-                              <label className="text-[9px] uppercase tracking-wide text-neutral-500">Delivery</label>
-                              <input type="number" min="0" value={deliveryVal} onChange={e=> setPriceDraft(p.sku,'delivery', e.target.value)} className="w-20 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
+                        {(() => {
+                          const draft = priceDraftsRef.current[p.sku]||{};
+                          const editMode = draft.__edit === true;
+                          const deliveryVal = draft.delivery!==undefined?draft.delivery:(p.delivery??'');
+                          const precioVal = draft.precioPar!==undefined?draft.precioPar:(p.precioPar??'');
+                          const dirty = (
+                            (deliveryVal!=='' && Number(deliveryVal||0)!==Number(p.delivery||0)) || (deliveryVal==='' && p.delivery!=null) ||
+                            (precioVal!=='' && Number(precioVal||0)!==Number(p.precioPar||0)) || (precioVal==='' && p.precioPar!=null)
+                          );
+                          const toggleEdit = ()=>{
+                            priceDraftsRef.current[p.sku] = { ...draft, __edit: !editMode };
+                            forcePriceDraftTick(x=>x+1);
+                          };
+                          const save = async ()=>{ await applyInlinePrice(p.sku); priceDraftsRef.current[p.sku] = { ...priceDraftsRef.current[p.sku], __edit:false }; forcePriceDraftTick(x=>x+1); };
+                          return (
+                            <div className="mt-2 text-[10px] text-neutral-300 flex flex-wrap gap-2 items-end w-full">
+                              {editMode ? (
+                                <>
+                                  <div className="flex flex-col gap-1">
+                                    <label className="text-[9px] uppercase tracking-wide text-neutral-500">Delivery</label>
+                                    <input type="number" min="0" value={deliveryVal} onChange={e=> setPriceDraft(p.sku,'delivery', e.target.value)} className="w-20 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <label className="text-[9px] uppercase tracking-wide text-neutral-500">Precio/par</label>
+                                    <input type="number" min="0" step="0.01" value={precioVal} onChange={e=> setPriceDraft(p.sku,'precioPar', e.target.value)} className="w-24 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
+                                  </div>
+                                  <div className="ml-auto flex gap-2 mt-5">
+                                    <button onClick={toggleEdit} className="px-3 h-7 rounded bg-neutral-700 text-neutral-300 text-[10px]">Cancelar</button>
+                                    <button disabled={!dirty} onClick={save} className={"px-3 h-7 rounded text-[10px] font-semibold "+(dirty?"bg-[#e7922b] text-[#1a2430] hover:brightness-110":"bg-neutral-700 text-neutral-500 cursor-not-allowed")}>{dirty? 'Guardar':'OK'}</button>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <span>Delivery: <b className="text-neutral-200">{p.delivery ?? '-'}</b></span>
+                                  <span>Precio/par: <b className="text-neutral-200">{p.precioPar ?? '-'}</b></span>
+                                  <button onClick={toggleEdit} className="ml-auto px-3 h-7 rounded bg-neutral-700 hover:bg-neutral-600 text-[10px]">Editar</button>
+                                </>
+                              )}
                             </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-[9px] uppercase tracking-wide text-neutral-500">Precio/par</label>
-                              <input type="number" min="0" step="0.01" value={precioVal} onChange={e=> setPriceDraft(p.sku,'precioPar', e.target.value)} className="w-24 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-[#e7922b]" />
-                            </div>
-                            <button disabled={!dirty} onClick={()=> applyInlinePrice(p.sku)} className={"ml-auto px-3 h-7 mt-5 rounded text-[10px] font-semibold "+(dirty?"bg-[#e7922b] text-[#1a2430] hover:brightness-110":"bg-neutral-700 text-neutral-500 cursor-not-allowed")}>{dirty? '✔ Guardar':'OK'}</button>
-                          </div>
-                        ); })()}
+                          );
+                        })()}
                         {(() => { const delivery=Number(p.delivery||0); const precio=Number(p.precioPar||0); const totalPV = (precio>0)? ((precio - delivery) * pares) : 0; return (
                           <div className="mt-1 text-[10px] text-neutral-400 flex items-center justify-between">
                             <span className="uppercase tracking-wide">TOTAL POR VENDER</span>
