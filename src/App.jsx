@@ -491,7 +491,16 @@ export default function App() {
         });
         if(u.length) setUsers(prev=>{
           const map=new Map(prev.map(x=>[x.id,x]));
-          u.forEach(r=>{ map.set(r.id, normalizeUser({ id:r.id, username:r.username, password:r.password, nombre:r.nombre, apellidos:r.apellidos, celular:r.celular, rol:r.rol, grupo:r.grupo, fechaIngreso:r.fecha_ingreso, sueldo:Number(r.sueldo||0), diaPago:r.dia_pago })); });
+          u.forEach(r=>{
+            const existing = map.get(r.id);
+            // Mantener password local si en la nube está null/'' (migración hacia Auth)
+            const mergedPassword = r.password ? r.password : (existing?.password || '');
+            map.set(r.id, normalizeUser({ id:r.id, username:r.username, password: mergedPassword, nombre:r.nombre, apellidos:r.apellidos, celular:r.celular, rol:r.rol, grupo:r.grupo, fechaIngreso:r.fecha_ingreso, sueldo:Number(r.sueldo||0), diaPago:r.dia_pago }));
+          });
+          // Asegurar existencia de pedroadmin incluso si no viene de Supabase todavía
+          if(!Array.from(map.values()).some(u=>u.username==='pedroadmin')){
+            map.set('admin2', normalizeUser({ id: 'admin2', nombre:'Pedro', apellidos:'Admin', username:'pedroadmin', password:'pedro123', rol:'admin', productos:[], grupo:'A', fechaIngreso: todayISO(), fechaPago: todayISO(), sueldo:0 }));
+          }
           return Array.from(map.values());
         });
         if(s.length) setSales(prev=>{
