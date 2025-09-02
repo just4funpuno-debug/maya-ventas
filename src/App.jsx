@@ -212,27 +212,13 @@ function horaBolivia() {
 }
 
 // ---------------------- Seed de DEMO ----------------------
-const seedProducts = [
-  { id: uid(), sku: "CVP-60", nombre: "Cardio Vascular Plus 60 caps", precio: 120, costo: 48, stock: 35 },
-  { id: uid(), sku: "FLEX-60", nombre: "FLEX CAPS 60 caps", precio: 110, costo: 44, stock: 22 },
-  { id: uid(), sku: "MENO-60", nombre: "MENO PAUSE 60 caps", precio: 130, costo: 52, stock: 18 },
-  { id: uid(), sku: "PBF-250", nombre: "PREBIOTIC FRESH 250 ml", precio: 70, costo: 28, stock: 50 },
-];
+const seedProducts = [];
 
 const seedUsers = [
-  { id: "admin", nombre: "Pedro", apellidos: "Admin", celular: "", email: "admin@maya.com", username: 'admin', password: "admin123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "admin", productos: [], grupo: 'A' },
-  // Nuevo admin adicional solicitado
-  { id: "admin2", nombre: "Pedro", apellidos: "Admin", celular: "", email: "pedroadmin@maya.com", username: 'pedroadmin', password: "pedro123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "admin", productos: [], grupo: 'A' },
-  // Renombrada Ana -> Beatriz Vargas
-  { id: "v1", nombre: "Beatriz", apellidos: "vargas", celular: "", email: "ana@maya.com", username: 'ana', password: "ana123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "seller", productos: [], grupo: 'A' },
-  { id: "v2", nombre: "Luisa", apellidos: "Pérez", celular: "", email: "luisa@maya.com", username: 'luisa', password: "luisa123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "seller", productos: ["MENO-60"], grupo: 'B' },
+  { id: "admin", nombre: "Pedro", apellidos: "Admin", celular: "", email: "admin@maya.com", username: 'admin', password: "admin123", fechaIngreso: todayISO(), sueldo: 0, fechaPago: todayISO(), rol: "admin", productos: [], grupo: 'A' }
 ];
 
-const seedSales = [
-  { id: uid(), fecha: todayISO(), ciudad: 'LA PAZ', sku: "CVP-60", cantidad: 2, precio: 120, vendedora: "Beatriz Vargas", metodo: "Efectivo", cliente: "Cliente 1", notas: "" },
-  { id: uid(), fecha: todayISO(), ciudad: 'EL ALTO', sku: "FLEX-60", cantidad: 1, precio: 110, vendedora: "Beatriz Vargas", metodo: "Yape/QR", cliente: "Cliente 2", notas: "" },
-  { id: uid(), fecha: todayISO(), ciudad: 'COCHABAMBA', sku: "MENO-60", cantidad: 1, precio: 130, vendedora: "Luisa Pérez", metodo: "Transferencia", cliente: "Cliente 3", notas: "" },
-];
+const seedSales = [];
 
 // LocalStorage helpers
 const LS_KEYS = { products: "ventas.products", users: "ventas.users", sales: "ventas.sales", session: "ventas.session", warehouseDispatches: 'ventas.wdispatch', teamMessages:'ventas.team.msgs' };
