@@ -552,6 +552,37 @@ export default function App() {
   useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('products', async()=>{
     try { await upsert('products', products.map(p=>({ id:p.id, sku:p.sku, nombre:p.nombre, precio:p.precio, costo:p.costo, stock:p.stock, imagen_url:p.imagenUrl||null, imagen_id:p.imagenId||null, sintetico:!!p.sintetico }))); } catch(e){ console.warn('sync products', e); }
   }); }, [products, usingCloud, cloudReady]);
+
+  // Realtime para products (INSERT/UPDATE/DELETE) – evita tener que recargar para ver cambios de otro dispositivo
+  useEffect(()=>{
+    if(!usingCloud || !cloudReady) return; // sólo en modo nube
+    try {
+      if(!supabase) return;
+      const mapRow = (r)=> ({ id:r.id, sku:r.sku, nombre:r.nombre, precio:r.precio, costo:r.costo, stock:r.stock, imagenUrl:r.imagen_url||null, imagenId:r.imagen_id||null, sintetico:!!r.sintetico });
+      const channel = supabase.channel('products_changes')
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'products' }, (payload)=>{
+          const row = mapRow(payload.new||{});
+          setProducts(prev=>{
+            if(prev.some(p=>p.id===row.id || p.sku===row.sku)) return prev.map(p=> (p.id===row.id || p.sku===row.sku) ? { ...p, ...row } : p);
+            return [...prev, row];
+          });
+          if(typeof __DBG!=='undefined' && __DBG) console.log('[realtime products] INSERT', row.sku);
+        })
+        .on('postgres_changes', { event:'UPDATE', schema:'public', table:'products' }, (payload)=>{
+          const row = mapRow(payload.new||{});
+            setProducts(prev=> prev.map(p=> (p.id===row.id || p.sku===row.sku) ? { ...p, ...row } : p));
+          if(typeof __DBG!=='undefined' && __DBG) console.log('[realtime products] UPDATE', row.sku);
+        })
+        .on('postgres_changes', { event:'DELETE', schema:'public', table:'products' }, (payload)=>{
+          const oldId = payload.old?.id; const oldSku = payload.old?.sku;
+          if(!oldId && !oldSku) return;
+          setProducts(prev=> prev.filter(p=> p.id!==oldId && p.sku!==oldSku));
+          if(typeof __DBG!=='undefined' && __DBG) console.log('[realtime products] DELETE', oldSku||oldId);
+        })
+        .subscribe(status=>{ if(status==='SUBSCRIBED' && typeof __DBG!=='undefined' && __DBG) console.log('[realtime products] subscribed'); });
+      return ()=>{ try { supabase.removeChannel(channel); } catch{} };
+    } catch(e){ if(typeof __DBG!=='undefined' && __DBG) console.warn('products realtime error', e); }
+  }, [usingCloud, cloudReady]);
   useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('users', async()=>{
     try {
       // Deduplicar local por username
@@ -1224,6 +1255,55 @@ function ResetAllButton({ session, onResetAll }){
         <button disabled={text!=='BORRAR TODO'} onClick={()=>{ if(text==='BORRAR TODO'){ setOpen(false); setText(''); onResetAll(); } }} className="flex-1 px-3 py-2 rounded-lg bg-red-600 disabled:opacity-40 text-sm font-semibold">Confirmar</button>
       </div>
     </div>
+  );
+}
+
+// ---------------------- Login Form (restaurado) ----------------------
+function LoginForm({ users=[], onLogin }) {
+  const [usuario, setUsuario] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e){
+    e.preventDefault();
+    setError('');
+    const uName = usuario.trim();
+    const pass = password;
+    if(!uName || !pass){ setError('Completa usuario y contraseña'); return; }
+    setLoading(true);
+    try {
+      // Fallback local: buscar por nombre (case-insensitive) o email
+      const lower = uName.toLowerCase();
+      const user = users.find(u => (u.nombre && u.nombre.toLowerCase()===lower) || (u.email && u.email.toLowerCase()===lower));
+      if(!user || user.password !== pass){
+        setError('Credenciales inválidas');
+      } else {
+        onLogin(user);
+      }
+    } catch(err){
+      console.warn('login error', err);
+      setError('Error inesperado');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <label className="text-xs uppercase tracking-wide text-neutral-400">Usuario</label>
+        <input autoFocus value={usuario} onChange={e=>setUsuario(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="Nombre" />
+      </div>
+      <div>
+        <label className="text-xs uppercase tracking-wide text-neutral-400">Contraseña</label>
+        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full bg-neutral-800 rounded-xl px-3 py-2 mt-1" placeholder="••••••" />
+      </div>
+      {error && <div className="text-sm text-red-400">{error}</div>}
+      <button disabled={loading} className="w-full px-5 py-2 rounded-xl bg-[#e7922b] disabled:opacity-40 text-[#1a2430] font-semibold text-sm">
+        {loading? 'Ingresando...' : 'Ingresar'}
+      </button>
+    </form>
   );
 }
 
