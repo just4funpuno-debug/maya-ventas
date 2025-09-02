@@ -8,6 +8,21 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+.env.test
+.envrc
+.env.backup*
+
+# Evitar exponer llaves accidentales
+*.pem
+*.key
+*.crt
+*.p8
+
+# Dumps locales
+dump.sql
+*.dump
 
 # Archivos del sistema
 .DS_Store
