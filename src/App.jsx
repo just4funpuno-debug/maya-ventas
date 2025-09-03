@@ -4796,6 +4796,13 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
               attempt++; continue;
             }
         }
+        if(msg.includes('invalid input syntax for type integer')){
+          // Convertir strings vacíos restantes a 0
+          Object.keys(remaining).forEach(k=>{
+            if(typeof remaining[k]==='string' && remaining[k].trim()==='') remaining[k]=0;
+          });
+          attempt++; continue;
+        }
         // Error no relacionado a columna inexistente -> lanzar
         throw error;
       }
@@ -4804,22 +4811,32 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
     // Guardar en Supabase primero
     if (typeof supabase !== 'undefined' && supabase) {
       try {
-        const updateObj = {
+        // Sanitización: evitar enviar "" a columnas integer/numeric
+        const toNull = v => (v===undefined || v===null || (typeof v==='string' && v.trim()==='')) ? null : v;
+        const toInt  = v => { const n = Number(v); return isNaN(n)? 0 : Math.trunc(n); };
+        const toNum  = v => { const n = Number(v); return isNaN(n)? 0 : n; };
+        const baseUpdate = {
           fecha: editForm.fecha,
-          hora_entrega: editForm.horaEntrega || null,
-          ciudad: editForm.ciudad,
-          metodo: editForm.metodo,
-          destino_encomienda: editForm.metodo==='Encomienda' ? (editForm.destinoEncomienda||'') : '',
-          vendedora: editForm.vendedora,
-          celular: editForm.celular,
-          sku: editForm.sku,
-          cantidad: Number(editForm.cantidad)||0,
-          sku_extra: editForm.skuExtra ? editForm.skuExtra : null,
-          cantidad_extra: Number(editForm.cantidadExtra)||0,
-          total: Number(editForm.total)||0,
-          gasto: Number(editForm.gasto)||0,
-          neto: (Number(editForm.total)||0) - (Number(editForm.gasto)||0)
+          hora_entrega: toNull(editForm.horaEntrega),
+          ciudad: toNull(editForm.ciudad),
+          metodo: toNull(editForm.metodo),
+          destino_encomienda: editForm.metodo==='Encomienda' ? toNull(editForm.destinoEncomienda) : null,
+          vendedora: toNull(editForm.vendedora),
+          celular: toNull(editForm.celular),
+          sku: toNull(editForm.sku),
+          cantidad: toInt(editForm.cantidad),
+          sku_extra: toNull(editForm.skuExtra),
+          cantidad_extra: toInt(editForm.cantidadExtra),
+          total: toNum(editForm.total),
+          gasto: toNum(editForm.gasto)
         };
+        baseUpdate.neto = (baseUpdate.total||0) - (baseUpdate.gasto||0);
+        // Remover claves null opcionales para no provocar updates innecesarios
+        const updateObj = {};
+        Object.entries(baseUpdate).forEach(([k,v])=>{
+          if(v===null && ['hora_entrega','destino_encomienda','sku_extra'].indexOf(k)===-1) return; // campos null opcionales omitidos
+          updateObj[k]=v;
+        });
         try {
           const ok = await safeUpdateSale(editingSale.id, updateObj);
           if(!ok){
