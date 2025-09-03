@@ -8,6 +8,7 @@ create table if not exists products (
   sku text unique not null,
   nombre text not null,
   precio numeric(12,2) not null default 0,
+  delivery numeric(12,2) default 0,
   costo numeric(12,2) not null default 0,
   stock integer not null default 0,
   imagen_url text,

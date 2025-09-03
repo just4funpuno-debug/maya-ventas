@@ -4772,8 +4772,72 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
 
   function updateEditField(field, value){ setEditForm(f=> ({...f, [field]: value})); }
 
-  function saveEditSale(){
+  async function saveEditSale(){
     if(!editingSale) return;
+    // Función auxiliar resiliente: intenta update removiendo columnas que no existan todavía en el esquema
+    async function safeUpdateSale(id, fields){
+      if(!supabase) return false;
+      let remaining = { ...fields };
+      let attempt = 0;
+      while(attempt < 6){
+        if(Object.keys(remaining).length===0){
+          if(__DBG) console.warn('[safeUpdateSale] sin campos para actualizar');
+          return true;
+        }
+        const { error } = await supabase.from('sales').update(remaining).eq('id', id);
+        if(!error) return true;
+        const msg = (error.message||'').toLowerCase();
+        const m = error.message && error.message.match(/column[^']+'([a-zA-Z0-9_]+)'/i);
+        if(m){
+          const col = m[1];
+            if(remaining.hasOwnProperty(col)){
+              if(__DBG) console.warn('[safeUpdateSale] quitando columna inexistente', col, 'y reintentando');
+              delete remaining[col];
+              attempt++; continue;
+            }
+        }
+        // Error no relacionado a columna inexistente -> lanzar
+        throw error;
+      }
+      return false;
+    }
+    // Guardar en Supabase primero
+    if (typeof supabase !== 'undefined' && supabase) {
+      try {
+        const updateObj = {
+          fecha: editForm.fecha,
+          hora_entrega: editForm.horaEntrega || null,
+          ciudad: editForm.ciudad,
+          metodo: editForm.metodo,
+          destino_encomienda: editForm.metodo==='Encomienda' ? (editForm.destinoEncomienda||'') : '',
+          vendedora: editForm.vendedora,
+          celular: editForm.celular,
+          sku: editForm.sku,
+          cantidad: Number(editForm.cantidad)||0,
+          sku_extra: editForm.skuExtra ? editForm.skuExtra : null,
+          cantidad_extra: Number(editForm.cantidadExtra)||0,
+          total: Number(editForm.total)||0,
+          gasto: Number(editForm.gasto)||0,
+          neto: (Number(editForm.total)||0) - (Number(editForm.gasto)||0)
+        };
+        try {
+          const ok = await safeUpdateSale(editingSale.id, updateObj);
+          if(!ok){
+            alert('No se pudo aplicar la edición (sin campos válidos).');
+            return;
+          }
+        } catch(error){
+          console.error('[Supabase UPDATE error]', error);
+          alert('Error editando en la nube: ' + (error.message || JSON.stringify(error)));
+          return;
+        }
+      } catch (e) {
+        console.error('[Supabase UPDATE exception]', e);
+        alert('Error editando en la nube: ' + (e.message || e));
+        return;
+      }
+    }
+    // Solo si la edición remota fue exitosa, actualiza local
     setSales(prev => prev.map(s=> s.id===editingSale.id ? {
       ...s,
       fecha: editForm.fecha,
@@ -4794,9 +4858,43 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
     setEditingSale(null);
   }
 
-  function deleteEditingSale(){
+  async function deleteEditingSale(){
     if(!editingSale) return;
-    // Eliminación definitiva
+    // Eliminar en Supabase primero
+    if (typeof supabase !== 'undefined' && supabase) {
+      try {
+        const saleId = editingSale.id;
+        if(__DBG) console.log('[delete sale] Intentando borrar', saleId, 'uuid?', isProbablyUUID(saleId));
+        const { error, data } = await supabase.from('sales').delete().eq('id', saleId).select('id');
+        if (error) {
+          console.error('[Supabase DELETE error]', error);
+          alert('Error eliminando en la nube: ' + (error.message || JSON.stringify(error)));
+          return;
+        }
+        if (!data || data.length === 0) {
+          console.warn('[Supabase DELETE] 0 filas afectadas (posible RLS o ID inexistente)', saleId);
+          alert('No se eliminó ninguna fila (posible RLS o ID inexistente). Revisa políticas DELETE de sales.');
+          // Continuamos pero NO quitamos local para evitar resurrecciones falsas
+          return;
+        }
+        // Confirmar realmente desapareció haciendo un refetch
+        const { data: still, error: checkErr } = await supabase.from('sales').select('id').eq('id', saleId).maybeSingle();
+        if (checkErr && checkErr.code && checkErr.code !== 'PGRST116') {
+          // Error distinto a "No rows found"
+            console.warn('[delete sale] error al verificar desaparición', checkErr);
+        }
+        if (still && still.id) {
+          console.warn('[delete sale] la fila sigue existiendo tras delete', saleId, still);
+          alert('La fila sigue existiendo tras borrar (posible política AFTER trigger o RLS).');
+          return; // no actualizar local todavía
+        }
+      } catch (e) {
+        console.error('[Supabase DELETE exception]', e);
+        alert('Error eliminando en la nube: ' + (e.message || e));
+        return;
+      }
+    }
+    // Solo si la eliminación remota fue exitosa, actualiza local
     setSales(prev => prev.filter(s=> s.id!==editingSale.id));
     setConfirmDeleteSale(false);
     setEditingSale(null);
