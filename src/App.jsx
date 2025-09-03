@@ -3325,8 +3325,18 @@ function CityPendingShipments({ city, dispatches, setDispatches, products, setPr
   }, [openId]);
   if(!pendientes.length) return null;
   function confirmar(d){
-    // Stock ya fue descontado al crear. Solo cambiar estado.
-    setDispatches(prev => prev.map(x=> x.id===d.id?{...x,status:'confirmado'}:x));
+      // Descontar stock de productos al confirmar despacho
+      setProducts(prev => {
+        let next = [...prev];
+        d.items.forEach(it => {
+          const idx = next.findIndex(p => p.sku === it.sku);
+          if(idx !== -1 && !next[idx].sintetico){
+            next[idx] = { ...next[idx], stock: (Number(next[idx].stock)||0) - (Number(it.cantidad)||0) };
+          }
+        });
+        return next;
+      });
+      setDispatches(prev => prev.map(x=> x.id===d.id?{...x,status:'confirmado'}:x));
   }
   function cancelar(d){
     if(!confirm('Cancelar envío pendiente?')) return;
