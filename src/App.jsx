@@ -345,6 +345,8 @@ export default function App() {
   const [teamMessages, setTeamMessages] = useState(()=> loadLS(LS_KEYS.teamMessages, [])); // [{id, grupo, authorId, authorNombre, text, createdAt, readBy:[] }]
   // Marca temporal de usuarios recientemente editados (para evitar que la carga inicial o un pull rápido sobrescriba cambios locales antes del push)
   const pendingUserEditsRef = useRef(new Set());
+  // IDs de ventas eliminadas localmente (tombstones) para evitar que el push las "resucite" si aún están en memoria hasta el próximo pull
+  const deletedSalesRef = useRef(new Set());
   const [view, setView] = useState(()=>{
     try { return localStorage.getItem('ui.view') || 'dashboard'; } catch { return 'dashboard'; }
   }); // 'dashboard' | 'historial' | 'ventas' | 'register-sale' | 'almacen' | 'create-user' | 'products' | 'mis-numeros' | 'config'
@@ -750,7 +752,9 @@ export default function App() {
   }, [usingCloud, cloudReady, users]);
   useEffect(()=>{ if(!usingCloud || !cloudReady || suppressSyncRef.current) return; debouncedPush('sales', async()=>{
     try {
-      const rows = sales.map(s=>{
+  // Filtrar ventas marcadas como eliminadas (tombstones) para no reinsertarlas con upsert
+  const activeSales = sales.filter(s=> !deletedSalesRef.current.has(s.id));
+  const rows = activeSales.map(s=>{
         const precioNum = Number(s.precio);
         const cantidadNum = Number(s.cantidad);
         const row = {
@@ -784,7 +788,9 @@ export default function App() {
       // Detectar filas problemáticas (precio null/improper)
       const bad = rows.filter(r=> r.precio==null || isNaN(Number(r.precio)));
       if(bad.length){ console.warn('Filas con precio inválido normalizadas a 0', bad.map(b=>b.id)); }
-      await upsert('sales', rows);
+      if(rows.length){
+        await upsert('sales', rows);
+      } else if(__DBG){ console.log('[SYNC sales] skip push (solo tombstones)'); }
       window._lastSalesPushError = null;
   if(__DBG){ console.log('[SYNC sales] upsert ok', rows.length); }
     } catch(e){ console.warn('sync sales', e); window._lastSalesPushError = e; }
@@ -848,11 +854,15 @@ export default function App() {
         const sb = supabase; if(!sb) return;
         const { data, error } = await sb.from('sales').select('*').order('updated_at',{ascending:false}).limit(200);
         if(!error && Array.isArray(data)){
-          setSales(prev=>{
+            setSales(prev=>{
             const before = prev.length;
             const map=new Map(prev.map(x=>[x.id,x]));
-            data.forEach(r=> map.set(r.id,{...map.get(r.id), ...r}));
-            const merged = Array.from(map.values());
+            data.forEach(r=>{
+              if(deletedSalesRef.current.has(r.id)) return; // no resucitar
+              map.set(r.id,{...map.get(r.id), ...r});
+            });
+            // También eliminar localmente cualquier tombstone que ya no exista remoto (asegura limpieza del ref)
+            const merged = Array.from(map.values()).filter(r=> !deletedSalesRef.current.has(r.id));
             if(window._SYNC_DEBUG){
               const newOnes = data.filter(r=> !prev.find(p=>p.id===r.id)).map(r=>r.id.slice(-6));
               if(newOnes.length) console.log('[SYNC sales poll] nuevos', newOnes);
@@ -4911,8 +4921,9 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
         return;
       }
     }
-    // Solo si la eliminación remota fue exitosa, actualiza local
-    setSales(prev => prev.filter(s=> s.id!==editingSale.id));
+  // Solo si la eliminación remota fue exitosa, actualiza local y marca tombstone
+  deletedSalesRef.current.add(editingSale.id);
+  setSales(prev => prev.filter(s=> s.id!==editingSale.id));
     setConfirmDeleteSale(false);
     setEditingSale(null);
   }
