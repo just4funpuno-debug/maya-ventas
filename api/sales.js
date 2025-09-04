@@ -1,16 +1,16 @@
-import { createClient } from '@supabase/supabase-js'
+// api/sales.js — CommonJS para Vercel Functions
+const { createClient } = require('@supabase/supabase-js')
 
-// Cliente Supabase con service_role (solo en servidor)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY // 🔒 nunca en frontend
+  process.env.SUPABASE_SERVICE_ROLE_KEY // 🔒 solo servidor
 )
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     if (req.method === 'POST') {
-      // Crear venta: { cantidad: number }
-      const { cantidad } = req.body
+      // Body JSON: { "cantidad": 9 }
+      const { cantidad } = req.body || {}
       if (typeof cantidad !== 'number') {
         return res.status(400).json({ error: 'cantidad debe ser un número' })
       }
@@ -20,23 +20,21 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
-      // Actualizar venta: { id: number, cantidad: number, version: number }
-      const { id, cantidad, version } = req.body
+      // Body JSON: { "id": 1, "cantidad": 7, "version": 0 }
+      const { id, cantidad, version } = req.body || {}
       if (typeof id !== 'number' || typeof cantidad !== 'number' || typeof version !== 'number') {
         return res.status(400).json({ error: 'id, cantidad y version deben ser números' })
       }
       const { data, error } = await supabase.rpc('safe_update_sales', {
-        p_id: id,
-        p_cantidad: cantidad,
-        p_version: version,
+        p_id: id, p_cantidad: cantidad, p_version: version
       })
       if (error) return res.status(500).json({ error: error.message })
       return res.status(200).json({ ok: true, data })
     }
 
     if (req.method === 'DELETE') {
-      // Eliminar venta: { id: number }
-      const { id } = req.body
+      // Body JSON: { "id": 1 }
+      const { id } = req.body || {}
       if (typeof id !== 'number') {
         return res.status(400).json({ error: 'id debe ser un número' })
       }
@@ -45,6 +43,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, data })
     }
 
+    // GET u otros métodos
     return res.status(405).json({ error: 'Método no permitido' })
   } catch (e) {
     return res.status(500).json({ error: e.message })
