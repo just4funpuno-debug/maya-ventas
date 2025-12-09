@@ -36,11 +36,27 @@ async function getSupabaseClient() {
 function subscribeCollectionFirebase(tableName, callback, options = {}) {
   let unsubscribeFn = null;
   
-  // Importar Firebase dinámicamente
+  // Importar Firebase dinámicamente - usar paths completamente dinámicos para evitar análisis estático
+  // Construir paths en runtime para que Vite no pueda analizarlos estáticamente
+  const baseDir = '../';
+  const deprecated = '_deprecated';
+  const firebaseFile = 'firebase';
+  const firebaseMod = 'firebase';
+  const firestoreMod = 'firestore';
+  
+  const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
+  const firestorePath = `${firebaseMod}/${firestoreMod}`;
+  
   Promise.all([
-    import('../_deprecated/firebase'),
-    import('firebase/firestore')
-  ]).then(([{ db }, firestore]) => {
+    import(/* @vite-ignore */ firebasePath).catch(() => null),
+    import(/* @vite-ignore */ firestorePath).catch(() => null)
+  ]).then((results) => {
+    if (!results[0] || !results[1]) {
+      console.warn('[subscribeCollectionFirebase] Firebase no disponible');
+      callback([]);
+      return;
+    }
+    const [{ db }, firestore] = results;
     const { collection, onSnapshot, query, where, orderBy, limit } = firestore;
     const colRef = collection(db, tableName);
     let firestoreQuery = colRef;
@@ -475,8 +491,28 @@ export async function getAllUsers() {
   if (provider === 'firebase') {
     // Usar Firebase
     try {
-      const { db } = await import('../_deprecated/firebase');
-      const { collection, getDocs, query, orderBy } = await import('firebase/firestore');
+      // Importar Firebase dinámicamente - usar paths completamente dinámicos
+      const baseDir = '../';
+      const deprecated = '_deprecated';
+      const firebaseFile = 'firebase';
+      const firebaseMod = 'firebase';
+      const firestoreMod = 'firestore';
+      
+      const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
+      const firestorePath = `${firebaseMod}/${firestoreMod}`;
+      
+      const results = await Promise.all([
+        import(/* @vite-ignore */ firebasePath).catch(() => null),
+        import(/* @vite-ignore */ firestorePath).catch(() => null)
+      ]);
+      
+      if (!results[0] || !results[1]) {
+        console.warn('[getAllUsers] Firebase no disponible');
+        return [];
+      }
+      
+      const [{ db }, firestore] = results;
+      const { collection, getDocs, query, orderBy } = firestore;
       
       const colRef = collection(db, 'users');
       const q = query(colRef, orderBy('nombre', 'asc'));

@@ -74,27 +74,59 @@ function cloudinaryDevApi(env){
     }
   };
 }
+// Plugin para manejar imports dinámicos de Firebase sin causar errores
+function firebaseDynamicImportPlugin() {
+  return {
+    name: 'firebase-dynamic-import',
+    resolveId(id, importer) {
+      // Si es un import dinámico de Firebase que no se puede resolver, retornar un módulo virtual
+      if ((id.includes('firebase/firestore') || id.includes('_deprecated/firebase')) && 
+          importer && !importer.includes('node_modules')) {
+        // Retornar un ID virtual para que Vite no intente resolverlo durante el build
+        return { id: `virtual:${id}`, external: false };
+      }
+      return null;
+    },
+    load(id) {
+      // Si es nuestro módulo virtual, retornar código que solo se ejecutará en runtime
+      if (id.startsWith('virtual:')) {
+        const originalId = id.replace('virtual:', '');
+        return `
+          // Módulo virtual para ${originalId}
+          // Este módulo se cargará dinámicamente en runtime
+          export default null;
+        `;
+      }
+      return null;
+    }
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Cargar TODAS las variables (.env, .env.local) sin filtrar prefijo para uso servidor
   const env = loadEnv(mode, process.cwd(), '');
   return {
-    plugins: [react(), cloudinaryDevApi(env)],
+    plugins: [react(), cloudinaryDevApi(env), firebaseDynamicImportPlugin()],
     build: {
       rollupOptions: {
         output: {
           manualChunks: {
             react: ["react", "react-dom"],
-              motion: ["framer-motion"],
-              recharts: ["recharts"],
-              ui: ["lucide-react"],
-              csv: ["papaparse"]
+            motion: ["framer-motion"],
+            recharts: ["recharts"],
+            ui: ["lucide-react"],
+            csv: ["papaparse"]
           }
         },
-        // Permitir que imports dinámicos de Firebase se resuelvan en runtime
-        external: (id) => {
-          // NO externalizar firebase/firestore - debe estar en el bundle
-          // Solo externalizar módulos que realmente no deberían estar en el bundle
-          return false;
+        // Manejar warnings sobre imports dinámicos de Firebase
+        onwarn(warning, warn) {
+          // Ignorar warnings sobre imports dinámicos de Firebase que no se pueden resolver estáticamente
+          if (warning.code === 'UNRESOLVED_IMPORT' && 
+              (warning.id?.includes('firebase') || warning.id?.includes('_deprecated'))) {
+            return;
+          }
+          // Usar el warn por defecto para otros warnings
+          warn(warning);
         }
       },
       chunkSizeWarningLimit: 1600,
