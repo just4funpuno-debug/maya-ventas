@@ -1700,90 +1700,34 @@ function LoginForm({ users, onLogin }) {
         throw new Error("Credenciales incorrectas");
       }
       
-      // Buscar datos extra del usuario según el proveedor
-      let userData = null;
-      let userError = null;
+      // Buscar usuario en la lista de usuarios ya cargada (subscribeUsers actualiza esta lista)
+      // Primero intentar por ID, luego por username/email
+      const usernameFromEmail = (email.includes('@') ? email.split('@')[0] : email).toLowerCase().trim();
+      let userData = users.find(u => 
+        u.id === authUser.uid || 
+        u.username?.toLowerCase() === usernameFromEmail ||
+        u.username?.toLowerCase() === email.toLowerCase()
+      );
       
-      if (provider === 'supabase') {
-        // Buscar datos en Supabase
-        const { supabase: supabaseClient } = await import('./supabaseClient');
-        if (!supabaseClient) {
-          warn('[loginUser] Supabase no disponible');
-        } else {
-          // Intentar buscar por auth_id (si está vinculado)
-          const { data: userByAuthId, error: errorByAuthId } = await supabaseClient
-            .from('users')
-            .select('*')
-            .eq('auth_id', authUser.uid)
-            .maybeSingle();
-          
-          if (errorByAuthId) {
-            warn('[loginUser] Error buscando usuario por auth_id:', errorByAuthId);
-          } else if (userByAuthId) {
-            userData = userByAuthId;
-          } else {
-            // Si no se encuentra por auth_id, buscar por id directo
-            const { data: userById, error: errorById } = await supabaseClient
-              .from('users')
-              .select('*')
-              .eq('id', authUser.uid)
-              .maybeSingle();
-            
-            if (errorById) {
-              warn('[loginUser] Error buscando usuario por id:', errorById);
-              userError = errorById;
-            } else if (userById) {
-              userData = userById;
-            }
-          }
-          
-          // Si aún no se encuentra, buscar por username (email sin dominio)
-          if (!userData) {
-            const usernameFromEmail = (email.includes('@') ? email.split('@')[0] : email).toLowerCase().trim();
-            const { data: userByUsername, error: errorByUsername } = await supabaseClient
-              .from('users')
-              .select('*')
-              .ilike('username', usernameFromEmail)
-              .maybeSingle();
-            
-            if (errorByUsername) {
-              warn('[loginUser] Error buscando usuario por username:', errorByUsername);
-            } else if (userByUsername) {
-              userData = userByUsername;
-            }
-          }
-        }
-      } else {
-          // Firebase: buscar datos en Firestore usando helper
-          try {
-            const { getUserDataFromFirestore } = await import('./utils/firebaseHelper');
-            userData = await getUserDataFromFirestore(authUser.uid);
-            if (!userData) {
-              warn('[loginUser] Usuario no encontrado en Firestore');
-            }
-          } catch (firestoreError) {
-            warn('[loginUser] Error buscando usuario en Firestore:', firestoreError);
-            userError = firestoreError;
-          }
-      }
-      
-      let userInfo = { 
-        id: userData?.id || authUser.uid, 
-        nombre: userData?.nombre || authUser.email?.split('@')[0] || '', 
-        username: userData?.username || authUser.email?.split('@')[0] || authUser.email || '', 
-        rol: userData?.rol || 'seller', 
-        productos: userData?.productos || [], 
-        grupo: userData?.grupo || '',
-        apellidos: userData?.apellidos || '',
-        celular: userData?.celular || '',
-        sueldo: userData?.sueldo || 0,
-        diaPago: userData?.dia_pago || userData?.diaPago || null,
-        fechaIngreso: userData?.fecha_ingreso || userData?.fechaIngreso || new Date().toISOString().split('T')[0]
+      // Si no se encuentra, crear objeto básico - subscribeUsers actualizará los datos completos
+      let userInfo = userData ? { ...userData } : {
+        id: authUser.uid,
+        username: usernameFromEmail,
+        nombre: usernameFromEmail,
+        rol: 'seller',
+        productos: [],
+        grupo: '',
+        apellidos: '',
+        celular: '',
+        sueldo: 0,
+        diaPago: null,
+        fechaIngreso: new Date().toISOString().split('T')[0]
       };
       
-      if (userData && !userError) {
-        userInfo = { ...userInfo, ...userData };
-      }
+      // Asegurar que tenga todos los campos necesarios
+      if (!userInfo.id) userInfo.id = authUser.uid;
+      if (!userInfo.username) userInfo.username = usernameFromEmail;
+      if (!userInfo.nombre) userInfo.nombre = usernameFromEmail;
       
       onLogin(userInfo);
     } catch (error) {
