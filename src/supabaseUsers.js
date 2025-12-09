@@ -116,15 +116,18 @@ export function subscribeCollection(tableName, callback, options = {}) {
     return () => {};
   }
 
-  // Detectar entorno
-  const provider = isDev() ? 'supabase' : 'firebase';
-
-  // Si estamos en producción, usar Firebase
-  if (provider === 'firebase') {
+  // Detectar entorno - en producción usar Firebase siempre
+  const isDevelopment = isDev();
+  
+  // Si estamos en producción, usar Firebase directamente
+  if (!isDevelopment) {
     return subscribeCollectionFirebase(tableName, callback, options);
   }
 
-  // Desarrollo: usar Supabase (código existente)
+  // En desarrollo, verificar si Supabase está realmente disponible (no dummy)
+  // Esto se hace de forma asíncrona dentro del getSupabaseClient
+
+  // Desarrollo con Supabase disponible: usar Supabase
   // Mapeo de colecciones de Firebase a tablas de Supabase
   const tableMap = {
     'almacenCentral': 'almacen_central',
@@ -145,10 +148,10 @@ export function subscribeCollection(tableName, callback, options = {}) {
 
   // Obtener datos iniciales y configurar suscripción
   getSupabaseClient().then(client => {
-    if (!client) {
-      console.error(`[subscribeCollection] Supabase no disponible para ${tableName}`);
-      callback([]);
-      return;
+    if (!client || client._isDummy) {
+      console.warn(`[subscribeCollection] Supabase no disponible para ${tableName}, usando Firebase`);
+      // Si Supabase no está disponible, usar Firebase en su lugar
+      return subscribeCollectionFirebase(tableName, callback, options);
     }
 
     let query = client.from(supabaseTable).select('*');

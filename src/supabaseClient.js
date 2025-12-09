@@ -120,19 +120,57 @@ if (!supabaseUrl || !supabaseAnonKey) {
     throw error;
   }
 } else {
-  // Crear cliente Supabase normal
-  supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: true
-    },
-    realtime: {
-      params: {
-        eventsPerSecond: 10
+  // Validar que la URL sea válida antes de crear el cliente
+  const isValidUrl = supabaseUrl && (
+    supabaseUrl.startsWith('https://') || 
+    supabaseUrl.startsWith('http://')
+  );
+  
+  // Si estamos en producción y la URL parece inválida, usar dummy
+  if (isProduction && (!isValidUrl || supabaseUrl.includes('vpdfyvgeenrkrrnenlib'))) {
+    console.warn('⚠️  URL de Supabase inválida en producción, usando cliente dummy');
+    // Reutilizar la lógica del dummy
+    const createDummyQuery = () => {
+      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no disponible en producción - usar Firebase' } });
+      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no disponible en producción - usar Firebase' } });
+      const chainable = () => chainableObj;
+      const chainableObj = {
+        eq: chainable, in: chainable, is: chainable, neq: chainable, gt: chainable, gte: chainable,
+        lt: chainable, lte: chainable, like: chainable, ilike: chainable, contains: chainable,
+        order: chainable, limit: chainable, range: chainable, select: chainable,
+        maybeSingle: () => dummySingle, single: () => dummySingle,
+        then: (callback) => { dummyResult.then(result => callback(result)); return dummyResult; }
+      };
+      return chainableObj;
+    };
+    supabaseClient = {
+      from: () => ({
+        select: () => createDummyQuery(),
+        insert: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }),
+        update: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }) }),
+        delete: () => ({ eq: () => Promise.resolve({ error: { message: 'Supabase no disponible - usar Firebase' } }) }),
+        upsert: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } })
+      }),
+      channel: () => ({ on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }), subscribe: () => ({ unsubscribe: () => {} }) }),
+      rpc: () => Promise.resolve({ data: null, error: { message: 'RPC no disponible - usar Firebase' } }),
+      auth: { signInWithPassword: () => Promise.resolve({ data: null, error: { message: 'Usar authProvider' } }) },
+      _isDummy: true
+    };
+  } else {
+    // Crear cliente Supabase normal
+    supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      },
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
       }
-    }
-  });
+    });
+  }
 }
 
 export const supabase = supabaseClient;
