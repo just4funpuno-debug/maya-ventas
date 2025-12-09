@@ -89,9 +89,20 @@ export default defineConfig(({ mode }) => {
               ui: ["lucide-react"],
               csv: ["papaparse"]
           }
+        },
+        // Permitir que imports dinámicos de Firebase se resuelvan en runtime
+        external: (id) => {
+          // NO externalizar firebase/firestore - debe estar en el bundle
+          // Solo externalizar módulos que realmente no deberían estar en el bundle
+          return false;
         }
       },
-      chunkSizeWarningLimit: 1600
+      chunkSizeWarningLimit: 1600,
+      // Asegurar que Vite no falle si encuentra imports dinámicos
+      commonjsOptions: {
+        include: [/node_modules/],
+        transformMixedEsModules: true
+      }
     }
   };
 });
