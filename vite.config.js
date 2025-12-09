@@ -80,7 +80,7 @@ function firebaseDynamicImportPlugin() {
     name: 'firebase-dynamic-import',
     resolveId(id, importer) {
       // Si es un import dinámico de Firebase que no se puede resolver, retornar un módulo virtual
-      if ((id.includes('firebase/firestore') || id.includes('_deprecated/firebase')) && 
+      if ((id.includes('firebase/') || id.includes('_deprecated/firebase') || id.includes('firebaseAuthUtils')) && 
           importer && !importer.includes('node_modules')) {
         // Retornar un ID virtual para que Vite no intente resolverlo durante el build
         return { id: `virtual:${id}`, external: false };

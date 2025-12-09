@@ -43,8 +43,14 @@ export async function loginUser(usernameOrEmail, password) {
     const { loginUser: supabaseLogin } = await import('../supabaseAuthUtils');
     return await supabaseLogin(usernameOrEmail, password);
   } else {
-    // Firebase Auth
-    const { loginUser: firebaseLogin } = await import('../../_deprecated/firebaseAuthUtils');
+    // Firebase Auth - usar path dinámico
+    const baseDir = '../../';
+    const deprecated = '_deprecated';
+    const firebaseAuthUtils = 'firebaseAuthUtils';
+    const firebasePath = `${baseDir}${deprecated}/${firebaseAuthUtils}`;
+    const { loginUser: firebaseLogin } = await import(/* @vite-ignore */ firebasePath).catch(() => {
+      throw new Error('Firebase no disponible');
+    });
     return await firebaseLogin(usernameOrEmail, password);
   }
 }
@@ -63,8 +69,14 @@ export async function registerUser(username, password, rol = "vendedora") {
     const { registerUser: supabaseRegister } = await import('../supabaseAuthUtils');
     return await supabaseRegister(username, password, rol);
   } else {
-    // Firebase Auth
-    const { registerUser: firebaseRegister } = await import('../../_deprecated/firebaseAuthUtils');
+    // Firebase Auth - usar path dinámico
+    const baseDir = '../../';
+    const deprecated = '_deprecated';
+    const firebaseAuthUtils = 'firebaseAuthUtils';
+    const firebasePath = `${baseDir}${deprecated}/${firebaseAuthUtils}`;
+    const { registerUser: firebaseRegister } = await import(/* @vite-ignore */ firebasePath).catch(() => {
+      throw new Error('Firebase no disponible');
+    });
     return await firebaseRegister(username, password, rol);
   }
 }
@@ -82,8 +94,14 @@ export async function changePassword(currentPassword, newPassword) {
     const { changePassword: supabaseChangePassword } = await import('../supabaseAuthUtils');
     return await supabaseChangePassword(currentPassword, newPassword);
   } else {
-    // Firebase Auth
-    const { changePassword: firebaseChangePassword } = await import('../../_deprecated/firebaseAuthUtils');
+    // Firebase Auth - usar path dinámico
+    const baseDir = '../../';
+    const deprecated = '_deprecated';
+    const firebaseAuthUtils = 'firebaseAuthUtils';
+    const firebasePath = `${baseDir}${deprecated}/${firebaseAuthUtils}`;
+    const { changePassword: firebaseChangePassword } = await import(/* @vite-ignore */ firebasePath).catch(() => {
+      throw new Error('Firebase no disponible');
+    });
     return await firebaseChangePassword(currentPassword, newPassword);
   }
 }
@@ -99,8 +117,14 @@ export async function getCurrentUser() {
     const { getCurrentUser: supabaseGetCurrentUser } = await import('../supabaseAuthUtils');
     return await supabaseGetCurrentUser();
   } else {
-    // Firebase Auth - usar auth.currentUser directamente
-    const { auth } = await import('../../_deprecated/firebase');
+    // Firebase Auth - usar path dinámico
+    const baseDir = '../../';
+    const deprecated = '_deprecated';
+    const firebaseFile = 'firebase';
+    const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
+    const { auth } = await import(/* @vite-ignore */ firebasePath).catch(() => {
+      return { auth: { currentUser: null } };
+    });
     return auth.currentUser ? {
       uid: auth.currentUser.uid,
       email: auth.currentUser.email,
@@ -120,8 +144,14 @@ export async function signOut() {
     const { signOut: supabaseSignOut } = await import('../supabaseAuthUtils');
     return await supabaseSignOut();
   } else {
-    // Firebase Auth
-    const { auth } = await import('../../_deprecated/firebase');
+    // Firebase Auth - usar path dinámico
+    const baseDir = '../../';
+    const deprecated = '_deprecated';
+    const firebaseFile = 'firebase';
+    const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
+    const { auth } = await import(/* @vite-ignore */ firebasePath).catch(() => {
+      throw new Error('Firebase no disponible');
+    });
     return await auth.signOut();
   }
 }
@@ -138,9 +168,25 @@ export async function onAuthStateChanged(callback) {
     const { onAuthStateChanged: supabaseOnAuthStateChanged } = await import('../supabaseAuthUtils');
     return supabaseOnAuthStateChanged(callback);
   } else {
-    // Firebase Auth
-    const { auth } = await import('../../_deprecated/firebase');
-    const { onAuthStateChanged: firebaseOnAuthStateChanged } = await import('firebase/auth');
+    // Firebase Auth - usar paths dinámicos
+    const baseDir = '../../';
+    const deprecated = '_deprecated';
+    const firebaseFile = 'firebase';
+    const firebaseMod = 'firebase';
+    const authMod = 'auth';
+    
+    const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
+    const firebaseAuthPath = `${firebaseMod}/${authMod}`;
+    
+    const [{ auth }, { onAuthStateChanged: firebaseOnAuthStateChanged }] = await Promise.all([
+      import(/* @vite-ignore */ firebasePath).catch(() => {
+        throw new Error('Firebase no disponible');
+      }),
+      import(/* @vite-ignore */ firebaseAuthPath).catch(() => {
+        throw new Error('Firebase Auth no disponible');
+      })
+    ]);
+    
     return firebaseOnAuthStateChanged(auth, (user) => {
       if (user) {
         callback({
