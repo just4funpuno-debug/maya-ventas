@@ -1754,23 +1754,12 @@ function LoginForm({ users, onLogin }) {
           }
         }
       } else {
-          // Firebase: buscar datos en Firestore
+          // Firebase: buscar datos en Firestore usando helper
           try {
-            // Import dinámico solo cuando realmente se necesite
-            const [firebaseModule, firestoreModule] = await Promise.all([
-              import("../_deprecated/firebase").catch(() => null),
-              import("firebase/firestore").catch(() => null)
-            ]);
-            
-            if (!firebaseModule || !firestoreModule) {
-              warn('[loginUser] Firebase no disponible');
-            } else {
-              const { db } = firebaseModule;
-              const { doc, getDoc } = firestoreModule;
-              const userDoc = await getDoc(doc(db, "users", authUser.uid));
-              if (userDoc.exists()) {
-                userData = { id: authUser.uid, ...userDoc.data() };
-              }
+            const { getUserDataFromFirestore } = await import('./utils/firebaseHelper');
+            userData = await getUserDataFromFirestore(authUser.uid);
+            if (!userData) {
+              warn('[loginUser] Usuario no encontrado en Firestore');
             }
           } catch (firestoreError) {
             warn('[loginUser] Error buscando usuario en Firestore:', firestoreError);
