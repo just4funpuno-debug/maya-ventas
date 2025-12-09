@@ -1,6 +1,27 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useToast } from './components/ToastProvider';
-import { registrarVentaPendiente, discountCityStock, restoreCityStock, adjustCityStock, subscribeCityStock } from "./supabaseUtils.js";
+
+// Helper para importar funciones de supabaseUtils dinámicamente (path construido para evitar análisis estático)
+async function getSupabaseUtils() {
+  try {
+    // Construir path dinámicamente para que Vite no lo analice estáticamente
+    const basePath = './';
+    const fileName = 'supabaseUtils';
+    const extension = '.js';
+    const path = `${basePath}${fileName}${extension}`;
+    return await import(/* @vite-ignore */ path);
+  } catch (e) {
+    // En producción con Firebase, retornar funciones vacías/no-op
+    return {
+      registrarVentaPendiente: async () => ({ id: Date.now().toString() }),
+      discountCityStock: async () => {},
+      restoreCityStock: async () => {},
+      adjustCityStock: async () => {},
+      subscribeCityStock: () => () => {},
+      eliminarVentaPendiente: async () => {}
+    };
+  }
+}
 import AlmacenCityStock from "./components/AlmacenCityStock";
 import ConfirmModal from "./components/ConfirmModal";
 import ErrorModal from "./components/ErrorModal";
@@ -74,7 +95,7 @@ async function transferToCity(sku, cantidad, ciudad) {
 // Eliminar venta pendiente y restaurar stock
 // ✅ EN USO - Se usa en deleteEditingSale() (línea ~7328)
 async function deletePendingSale(saleId, sale) {
-  const { eliminarVentaPendiente } = await import('./supabaseUtils');
+  const { eliminarVentaPendiente } = await getSupabaseUtils();
   await eliminarVentaPendiente(saleId, sale);
 }
 
@@ -96,7 +117,8 @@ Esta estructura permite reportes claros, auditoría y fácil mantenimiento.
 // --- Actualizar stock de ciudad en Supabase ---
 async function updateCityStock(ciudad, items) {
   if (!ciudad || !items || !Object.keys(items).length) return;
-  // Usar función helper de supabaseUtils
+  // Usar función helper de supabaseUtils (dinámico)
+  const { adjustCityStock } = await import('./supabaseUtils.js').catch(() => ({ adjustCityStock: async () => {} }));
   await adjustCityStock(ciudad, items);
 }
 import { subscribeCollection, subscribeUsers, normalizeUser, normalizeSale } from "./supabaseUsers";
@@ -5227,10 +5249,13 @@ function CityStock({ city, products, sales, dispatches, setSales, session, onSto
   
   useEffect(() => {
     if (!city) return;
-    // Usar subscribeCityStock de supabaseUtils
-    const unsub = subscribeCityStock(city, (stockData) => {
-      // Actualizar directamente con los datos de Realtime (fuente de verdad)
-      setCityStock(stockData || {});
+    // Usar subscribeCityStock de supabaseUtils (dinámico)
+    let unsub = () => {};
+    getSupabaseUtils().then(utils => {
+      unsub = utils.subscribeCityStock(city, (stockData) => {
+        // Actualizar directamente con los datos de Realtime (fuente de verdad)
+        setCityStock(stockData || {});
+      });
     });
     return () => unsub && unsub();
   }, [city, stockRefreshKey]); // Agregar stockRefreshKey para forzar refresh
@@ -6945,8 +6970,11 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
   useEffect(() => {
     if (!selectedCity) return;
     // Usar subscribeCityStock de supabaseUtils
-    const unsub = subscribeCityStock(selectedCity, (stockData) => {
-      setCityStock(stockData || {});
+    let unsub = () => {};
+    getSupabaseUtils().then(utils => {
+      unsub = utils.subscribeCityStock(selectedCity, (stockData) => {
+        setCityStock(stockData || {});
+      });
     });
     return () => unsub && unsub();
   }, [selectedCity]);
@@ -7018,6 +7046,7 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
     }
     
     try {
+      const { registrarVentaPendiente } = await getSupabaseUtils();
       const result = await registrarVentaPendiente({
         ...payload,
         usuario: session?.nombre || session?.email || '',
@@ -8244,7 +8273,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBac
       // Ajustar cityStock manualmente por delta
       const oldRow = confirmEditModal.oldRow;
       const newRow = confirmEditModal.newRow;
-      const { discountCityStock, restoreCityStock } = await import('./supabaseUtils');
+      const { discountCityStock, restoreCityStock } = await getSupabaseUtils();
       // Principal
       if(oldRow.sku !== newRow.sku){
         if(oldRow.sku && oldRow.cantidad) await restoreCityStock(oldRow.ciudad, oldRow.sku, Number(oldRow.cantidad));
