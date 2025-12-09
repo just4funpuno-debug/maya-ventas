@@ -1,53 +1,210 @@
-// Supabase client initialization
-// Expect environment variables:
-// VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (only anon key safe for client)
+/**
+ * Cliente Supabase
+ * Fase 7.1: Cliente Supabase para reemplazar Firebase
+ * 
+ * Configuración del cliente Supabase con variables de entorno
+ * En producción, si no hay Supabase configurado, crea un cliente dummy
+ * (la aplicación debería usar Firebase en ese caso)
+ */
+
 import { createClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Detectar entorno
+const isProduction = typeof import.meta !== 'undefined' && import.meta.env 
+  ? import.meta.env.PROD === true
+  : process.env.NODE_ENV === 'production';
 
-export const supabase = (url && anon) ? createClient(url, anon, {
-	auth: { persistSession: true, autoRefreshToken: true },
-	db: { schema: 'public' }
-}) : null;
+// Variables de entorno (compatible con Vite y Node.js)
+const supabaseUrl = typeof import.meta !== 'undefined' && import.meta.env 
+  ? import.meta.env.VITE_SUPABASE_URL 
+  : process.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = typeof import.meta !== 'undefined' && import.meta.env 
+  ? import.meta.env.VITE_SUPABASE_ANON_KEY 
+  : process.env.VITE_SUPABASE_ANON_KEY;
 
-export function ensureSupabase() {
-	if(!supabase) throw new Error('Supabase no configurado. Define VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
-	return supabase;
+// Crear cliente Supabase según disponibilidad
+let supabaseClient;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  if (isProduction) {
+    // En producción sin Supabase: crear cliente dummy que no falle
+    // Las operaciones de datos reales se manejarán a través de supabaseUsers.js que usa Firebase
+    console.log('ℹ️  Producción: Variables de Supabase no configuradas. El código usará Firebase automáticamente para datos.');
+    
+    // Crear cliente dummy para evitar errores en imports
+    supabaseClient = createClient('https://dummy.supabase.co', 'dummy-key', {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
+  } else {
+    // En desarrollo: lanzar error
+    const error = new Error('Supabase no configurado. Verifica las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
+    console.error('❌ Variables de entorno de Supabase no configuradas');
+    console.error('   Necesitas: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
+    throw error;
+  }
+} else {
+  // Crear cliente Supabase normal
+  supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true
+    },
+    realtime: {
+      params: {
+        eventsPerSecond: 10
+      }
+    }
+  });
 }
 
-// Helper generic fetchers
-export async function fetchAll(table){
-	const sb = ensureSupabase();
-	const { data, error } = await sb.from(table).select('*');
-	if(error) throw error; return data;
+export const supabase = supabaseClient;
+
+/**
+ * Helper: Verificar conexión a Supabase
+ */
+export async function testSupabaseConnection() {
+  try {
+    const { data, error } = await supabase
+      .from('almacen_central')
+      .select('count')
+      .limit(1);
+    
+    if (error) {
+      console.error('❌ Error conectando a Supabase:', error);
+      return { success: false, error };
+    }
+    
+    console.log('✅ Conexión a Supabase exitosa');
+    return { success: true, data };
+  } catch (err) {
+    console.error('❌ Error fatal conectando a Supabase:', err);
+    return { success: false, error: err };
+  }
 }
 
-export async function upsert(table, rows){
-	const sb = ensureSupabase();
-	const { data, error } = await sb.from(table).upsert(rows).select();
-	if(error) throw error; return data;
+/**
+ * Helper: Obtener tabla completa (para migración gradual)
+ */
+export async function getTable(tableName, filters = {}) {
+  try {
+    let query = supabase.from(tableName).select('*');
+    
+    // Aplicar filtros
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        query = query.eq(key, value);
+      }
+    });
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error(`❌ Error obteniendo ${tableName}:`, error);
+      return { data: null, error };
+    }
+    
+    return { data, error: null };
+  } catch (err) {
+    console.error(`❌ Error fatal obteniendo ${tableName}:`, err);
+    return { data: null, error: err };
+  }
 }
 
-export async function removeByIds(table, ids){
-	const sb = ensureSupabase();
-	const { error } = await sb.from(table).delete().in('id', ids);
-	if(error) throw error; return true;
+/**
+ * Helper: Suscripción en tiempo real (reemplaza onSnapshot)
+ */
+export function subscribeTable(tableName, callback, filters = {}) {
+  let query = supabase
+    .channel(`${tableName}_changes`)
+    .on('postgres_changes', 
+      { 
+        event: '*', 
+        schema: 'public', 
+        table: tableName 
+      }, 
+      (payload) => {
+        callback(payload);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    query.unsubscribe();
+  };
 }
 
-// Delete all rows of a table (dev/reset) by batching IDs to evitar errores de casteo uuid
-export async function clearTable(table){
-	const sb = ensureSupabase();
-	// Obtener solo los IDs (hasta 10k; si necesitas más, paginar)
-	const { data, error } = await sb.from(table).select('id');
-	if(error) throw error;
-	if(!Array.isArray(data) || !data.length) return true;
-	const ids = data.map(r=> r.id).filter(Boolean);
-	const chunkSize = 500;
-	for(let i=0;i<ids.length;i+=chunkSize){
-		const chunk = ids.slice(i,i+chunkSize);
-		const { error: delErr } = await sb.from(table).delete().in('id', chunk);
-		if(delErr) throw delErr;
-	}
-	return true;
+/**
+ * Helper: Insertar registro
+ */
+export async function insertRecord(tableName, record) {
+  try {
+    const { data, error } = await supabase
+      .from(tableName)
+      .insert(record)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error(`❌ Error insertando en ${tableName}:`, error);
+      return { data: null, error };
+    }
+    
+    return { data, error: null };
+  } catch (err) {
+    console.error(`❌ Error fatal insertando en ${tableName}:`, err);
+    return { data: null, error: err };
+  }
 }
+
+/**
+ * Helper: Actualizar registro
+ */
+export async function updateRecord(tableName, id, updates) {
+  try {
+    const { data, error } = await supabase
+      .from(tableName)
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error(`❌ Error actualizando ${tableName}:`, error);
+      return { data: null, error };
+    }
+    
+    return { data, error: null };
+  } catch (err) {
+    console.error(`❌ Error fatal actualizando ${tableName}:`, err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Helper: Eliminar registro
+ */
+export async function deleteRecord(tableName, id) {
+  try {
+    const { error } = await supabase
+      .from(tableName)
+      .delete()
+      .eq('id', id);
+    
+    if (error) {
+      console.error(`❌ Error eliminando de ${tableName}:`, error);
+      return { success: false, error };
+    }
+    
+    return { success: true, error: null };
+  } catch (err) {
+    console.error(`❌ Error fatal eliminando de ${tableName}:`, err);
+    return { success: false, error: err };
+  }
+}
+
+// Exportar por defecto el cliente
+export default supabase;
