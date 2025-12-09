@@ -18,9 +18,14 @@ let firebaseDb = null;
 
 // Lazy loading de clientes
 async function getSupabaseClient() {
-  if (!supabase && isDev()) {
-    const { supabase: client } = await import('./supabaseClient.js');
-    supabase = client;
+  if (!supabase) {
+    try {
+      const { supabase: client } = await import('./supabaseClient.js');
+      supabase = client;
+    } catch (error) {
+      console.warn('[getSupabaseClient] Error importando cliente Supabase:', error);
+      return null;
+    }
   }
   return supabase;
 }
@@ -146,13 +151,20 @@ export function subscribeCollection(tableName, callback, options = {}) {
 
   const supabaseTable = tableMap[tableName] || tableName;
 
+  // Verificar si Supabase está disponible antes de intentar usarlo
+  let unsubscribeFn = null;
+  let supabaseAvailable = false;
+
   // Obtener datos iniciales y configurar suscripción
   getSupabaseClient().then(client => {
     if (!client || client._isDummy) {
       console.warn(`[subscribeCollection] Supabase no disponible para ${tableName}, usando Firebase`);
       // Si Supabase no está disponible, usar Firebase en su lugar
-      return subscribeCollectionFirebase(tableName, callback, options);
+      unsubscribeFn = subscribeCollectionFirebase(tableName, callback, options);
+      return;
     }
+
+    supabaseAvailable = true;
 
     let query = client.from(supabaseTable).select('*');
 
@@ -261,15 +273,22 @@ export function subscribeCollection(tableName, callback, options = {}) {
       .subscribe();
 
     // Guardar función de desuscripción
-    let unsubscribeFn = () => channel.unsubscribe();
-    return unsubscribeFn;
+    unsubscribeFn = () => channel.unsubscribe();
   }).catch(error => {
     console.error(`[subscribeCollection] Error en Supabase:`, error);
+    // Si falla Supabase, intentar usar Firebase como fallback
+    if (!unsubscribeFn) {
+      unsubscribeFn = subscribeCollectionFirebase(tableName, callback, options);
+    }
     callback([]);
   });
 
-  // Retornar función de desuscripción temporal (se actualizará cuando se configure el canal)
-  return () => {};
+  // Retornar función de desuscripción que se actualizará cuando se configure
+  return () => {
+    if (unsubscribeFn) {
+      unsubscribeFn();
+    }
+  };
 }
 
 /**
