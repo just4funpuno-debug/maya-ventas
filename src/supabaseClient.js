@@ -9,10 +9,10 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-// Detectar entorno
+// Detectar entorno - verificar tanto PROD como Vercel deployment
 const isProduction = typeof import.meta !== 'undefined' && import.meta.env 
-  ? import.meta.env.PROD === true
-  : process.env.NODE_ENV === 'production';
+  ? (import.meta.env.PROD === true || import.meta.env.MODE === 'production')
+  : (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1');
 
 // Variables de entorno (compatible con Vite y Node.js)
 const supabaseUrl = typeof import.meta !== 'undefined' && import.meta.env 
@@ -27,17 +27,91 @@ let supabaseClient;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   if (isProduction) {
-    // En producción sin Supabase: crear cliente dummy que no falle
-    // Las operaciones de datos reales se manejarán a través de supabaseUsers.js que usa Firebase
+    // En producción sin Supabase: crear cliente dummy que no intente conexiones reales
     console.log('ℹ️  Producción: Variables de Supabase no configuradas. El código usará Firebase automáticamente para datos.');
     
-    // Crear cliente dummy para evitar errores en imports
-    supabaseClient = createClient('https://dummy.supabase.co', 'dummy-key', {
+    // Crear cliente dummy completo que NO intenta conexiones reales
+    // Este mock debe cubrir todos los métodos encadenados posibles
+    const createDummyQuery = () => {
+      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no disponible en producción - usar Firebase' } });
+      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no disponible en producción - usar Firebase' } });
+      
+      // Objeto que retorna a sí mismo para permitir encadenamiento infinito
+      const chainable = () => chainableObj;
+      const chainableObj = {
+        eq: chainable,
+        in: chainable,
+        is: chainable,
+        neq: chainable,
+        gt: chainable,
+        gte: chainable,
+        lt: chainable,
+        lte: chainable,
+        like: chainable,
+        ilike: chainable,
+        contains: chainable,
+        order: chainable,
+        limit: chainable,
+        range: chainable,
+        select: chainable,
+        maybeSingle: () => dummySingle,
+        single: () => dummySingle,
+        then: (callback) => {
+          dummyResult.then(result => callback(result));
+          return dummyResult;
+        }
+      };
+      
+      return chainableObj;
+    };
+    
+    supabaseClient = {
+      from: (table) => {
+        // Silenciar llamadas a Supabase en producción sin config
+        if (typeof console !== 'undefined' && console.warn) {
+          // Solo loguear una vez por tabla para no saturar la consola
+          if (!supabaseClient._warnedTables) {
+            supabaseClient._warnedTables = new Set();
+          }
+          if (!supabaseClient._warnedTables.has(table)) {
+            console.warn(`[Supabase Dummy] Llamada a tabla '${table}' ignorada - usar Firebase en producción`);
+            supabaseClient._warnedTables.add(table);
+          }
+        }
+        
+        return {
+          select: (columns) => createDummyQuery(),
+          insert: (data) => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }),
+          update: (data) => ({
+            eq: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }),
+            in: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } })
+          }),
+          delete: () => ({
+            eq: () => Promise.resolve({ error: { message: 'Supabase no disponible - usar Firebase' } }),
+            in: () => Promise.resolve({ error: { message: 'Supabase no disponible - usar Firebase' } })
+          }),
+          upsert: (data) => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } })
+        };
+      },
+      channel: (name) => {
+        // Canal dummy que no intenta conexiones WebSocket
+        return {
+          on: () => ({
+            subscribe: () => ({ unsubscribe: () => {} })
+          }),
+          subscribe: () => ({ unsubscribe: () => {} })
+        };
+      },
+      rpc: (func, params) => Promise.resolve({ data: null, error: { message: 'RPC no disponible - usar Firebase' } }),
       auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    });
+        signInWithPassword: () => Promise.resolve({ data: null, error: { message: 'Usar authProvider para autenticación' } }),
+        signOut: () => Promise.resolve({ error: null }),
+        getUser: () => Promise.resolve({ data: { user: null }, error: null }),
+        getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+        onAuthStateChange: () => ({ unsubscribe: () => {} })
+      },
+      _isDummy: true // Flag para identificar que es un cliente dummy
+    };
   } else {
     // En desarrollo: lanzar error
     const error = new Error('Supabase no configurado. Verifica las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
