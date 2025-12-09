@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import { useToast } from './components/ToastProvider.jsx';
+import { useToast } from './components/ToastProvider';
 import { registrarVentaPendiente, discountCityStock, restoreCityStock, adjustCityStock, subscribeCityStock } from "./supabaseUtils";
 import AlmacenCityStock from "./components/AlmacenCityStock";
 import ConfirmModal from "./components/ConfirmModal";
