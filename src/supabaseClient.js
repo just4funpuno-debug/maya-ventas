@@ -28,13 +28,14 @@ let supabaseClient;
 if (!supabaseUrl || !supabaseAnonKey) {
   if (isProduction) {
     // En producción sin Supabase: crear cliente dummy que no intente conexiones reales
-    console.log('ℹ️  Producción: Variables de Supabase no configuradas. El código usará Firebase automáticamente para datos.');
+    console.error('❌ ERROR: Variables de Supabase no configuradas en producción.');
+    console.error('   Por favor configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en el dashboard de Vercel.');
     
     // Crear cliente dummy completo que NO intenta conexiones reales
     // Este mock debe cubrir todos los métodos encadenados posibles
     const createDummyQuery = () => {
-      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no disponible en producción - usar Firebase' } });
-      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no disponible en producción - usar Firebase' } });
+      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
+      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
       
       // Objeto que retorna a sí mismo para permitir encadenamiento infinito
       const chainable = () => chainableObj;
@@ -132,8 +133,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.error('❌ ERROR: URL de Supabase inválida en producción. Por favor configura VITE_SUPABASE_URL en Vercel.');
     // Reutilizar la lógica del dummy
     const createDummyQuery = () => {
-      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no disponible en producción - usar Firebase' } });
-      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no disponible en producción - usar Firebase' } });
+      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
+      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
       const chainable = () => chainableObj;
       const chainableObj = {
         eq: chainable, in: chainable, is: chainable, neq: chainable, gt: chainable, gte: chainable,
