@@ -127,8 +127,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
   
   // Si estamos en producción y la URL parece inválida, usar dummy
-  if (isProduction && (!isValidUrl || supabaseUrl.includes('vpdfyvgeenrkrrnenlib'))) {
-    console.warn('⚠️  URL de Supabase inválida en producción, usando cliente dummy');
+  // Ya no validamos URLs específicas, solo si existe
+  if (isProduction && !isValidUrl) {
+    console.error('❌ ERROR: URL de Supabase inválida en producción. Por favor configura VITE_SUPABASE_URL en Vercel.');
     // Reutilizar la lógica del dummy
     const createDummyQuery = () => {
       const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no disponible en producción - usar Firebase' } });

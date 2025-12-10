@@ -1,20 +1,17 @@
 /**
  * Utilidades para manejar usuarios y suscripciones genéricas
- * Fase 7.4: Reemplazo de firestoreUsers.js
  * 
  * IMPORTANTE: Nunca guardar contraseñas aquí; sólo en Auth.
  * 
- * Este módulo ahora detecta automáticamente el entorno:
- * - Desarrollo (localhost): Usa Supabase
- * - Producción (Vercel): Usa Firebase
+ * Este módulo usa Supabase en todos los entornos (desarrollo y producción).
+ * Migración completa desde Firebase a Supabase completada.
  */
 
-import { isDev, isProd } from './utils/envValidation';
+import { isDev } from './utils/envValidation';
 import { denormalizeCity } from './utils/cityUtils';
 
-// Importar cliente según el entorno
+// Importar cliente Supabase
 let supabase = null;
-let firebaseDb = null;
 
 // Lazy loading de clientes
 async function getSupabaseClient() {
@@ -137,16 +134,7 @@ export function subscribeCollection(tableName, callback, options = {}) {
     return () => {};
   }
 
-  // Detectar entorno - en producción usar Firebase siempre
-  const isDevelopment = isDev();
-  
-  // Si estamos en producción, usar Firebase directamente
-  if (!isDevelopment) {
-    return subscribeCollectionFirebase(tableName, callback, options);
-  }
-
-  // En desarrollo, verificar si Supabase está realmente disponible (no dummy)
-  // Esto se hace de forma asíncrona dentro del getSupabaseClient
+  // Siempre usar Supabase en todos los entornos
 
   // Desarrollo con Supabase disponible: usar Supabase
   // Mapeo de colecciones de Firebase a tablas de Supabase
@@ -174,9 +162,8 @@ export function subscribeCollection(tableName, callback, options = {}) {
   // Obtener datos iniciales y configurar suscripción
   getSupabaseClient().then(client => {
     if (!client || client._isDummy) {
-      console.warn(`[subscribeCollection] Supabase no disponible para ${tableName}, usando Firebase`);
-      // Si Supabase no está disponible, usar Firebase en su lugar
-      unsubscribeFn = subscribeCollectionFirebase(tableName, callback, options);
+      console.error(`❌ ERROR: Supabase no disponible para ${tableName}. Por favor configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.`);
+      callback([]);
       return;
     }
 
@@ -291,11 +278,7 @@ export function subscribeCollection(tableName, callback, options = {}) {
     // Guardar función de desuscripción
     unsubscribeFn = () => channel.unsubscribe();
   }).catch(error => {
-    console.error(`[subscribeCollection] Error en Supabase:`, error);
-    // Si falla Supabase, intentar usar Firebase como fallback
-    if (!unsubscribeFn) {
-      unsubscribeFn = subscribeCollectionFirebase(tableName, callback, options);
-    }
+    console.error(`❌ ERROR: Error en Supabase para ${tableName}:`, error);
     callback([]);
   });
 
@@ -486,50 +469,13 @@ export function normalizeSale(s) {
  * Reemplaza: firestoreUsers.getAllUsers()
  */
 export async function getAllUsers() {
-  const provider = isDev() ? 'supabase' : 'firebase';
-  
-  if (provider === 'firebase') {
-    // Usar Firebase
-    try {
-      // Importar Firebase dinámicamente - usar paths completamente dinámicos
-      const baseDir = '../';
-      const deprecated = '_deprecated';
-      const firebaseFile = 'firebase';
-      const firebaseMod = 'firebase';
-      const firestoreMod = 'firestore';
-      
-      const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
-      const firestorePath = `${firebaseMod}/${firestoreMod}`;
-      
-      const results = await Promise.all([
-        import(/* @vite-ignore */ firebasePath).catch(() => null),
-        import(/* @vite-ignore */ firestorePath).catch(() => null)
-      ]);
-      
-      if (!results[0] || !results[1]) {
-        console.warn('[getAllUsers] Firebase no disponible');
-        return [];
-      }
-      
-      const [{ db }, firestore] = results;
-      const { collection, getDocs, query, orderBy } = firestore;
-      
-      const colRef = collection(db, 'users');
-      const q = query(colRef, orderBy('nombre', 'asc'));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => normalizeUser({ id: d.id, ...d.data() }));
-    } catch (err) {
-      console.error('[getAllUsers] Error fatal (Firebase):', err);
+  // Siempre usar Supabase
+  try {
+    const client = await getSupabaseClient();
+    if (!client || client._isDummy) {
+      console.error('❌ ERROR: Supabase no disponible. Por favor configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.');
       return [];
     }
-  } else {
-    // Usar Supabase
-    try {
-      const client = await getSupabaseClient();
-      if (!client) {
-        console.error('[getAllUsers] Supabase no disponible');
-        return [];
-      }
       
       const { data, error } = await client
         .from('users')
