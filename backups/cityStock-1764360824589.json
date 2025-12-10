@@ -1,0 +1,90 @@
+{
+  "collection": "cityStock",
+  "timestamp": "2025-11-28T20:13:44.589Z",
+  "count": 8,
+  "documents": [
+    {
+      "id": "COCHABAMBA",
+      "CARDIO-P-HC3": 8,
+      "FAST-BRA-QCF": 1,
+      "VITA-LEG-GUA": 5,
+      "PREBIOTI-X51": 2,
+      "FLEX-CAP-B6L": 4,
+      "MENO-PAU-UTH": 8,
+      "SERENI-T-9BU": 6
+    },
+    {
+      "id": "EL ALTO",
+      "SERENI-T-9BU": 4,
+      "CARDIO-P-HC3": 23,
+      "VITA-LEG-GUA": 19,
+      "PREBIOTI-X51": 2,
+      "FLEX-CAP-B6L": 9,
+      "FAST-BRA-QCF": 7,
+      "MENO-PAU-UTH": 11
+    },
+    {
+      "id": "LA PAZ",
+      "MENO-PAU-UTH": 13,
+      "VITA-LEG-GUA": 15,
+      "FAST-BRA-QCF": 2,
+      "FLEX-CAP-B6L": 6,
+      "CARDIO-P-HC3": 16,
+      "DELIVERY-GYS": 0,
+      "SERENI-T-9BU": 3,
+      "PREBIOTI-X51": 4
+    },
+    {
+      "id": "ORURO",
+      "CARDIO-P-HC3": 7,
+      "SERENI-T-9BU": 6,
+      "PREBIOTI-X51": 2,
+      "FLEX-CAP-B6L": 4,
+      "MENO-PAU-UTH": 6,
+      "VITA-LEG-GUA": 0,
+      "FAST-BRA-QCF": 8
+    },
+    {
+      "id": "POTOSI",
+      "VITA-LEG-GUA": 8,
+      "PREBIOTI-X51": 6,
+      "FAST-BRA-QCF": 10,
+      "SERENI-T-9BU": 4,
+      "CARDIO-P-HC3": 2,
+      "FLEX-CAP-B6L": 7,
+      "MENO-PAU-UTH": 12,
+      "DELIVERY-GYS": 0
+    },
+    {
+      "id": "SANTA CRUZ",
+      "VITA-LEG-GUA": 13,
+      "CARDIO-P-HC3": 30,
+      "FAST-BRA-QCF": 16,
+      "PREBIOTI-X51": 0,
+      "SERENI-T-9BU": 8,
+      "MENO-PAU-UTH": 15,
+      "FLEX-CAP-B6L": 0,
+      "DELIVERY-GYS": 0
+    },
+    {
+      "id": "SUCRE",
+      "SERENI-T-9BU": 2,
+      "MENO-PAU-UTH": 10,
+      "FLEX-CAP-B6L": 12,
+      "DELIVERY-GYS": 1,
+      "VITA-LEG-GUA": 20,
+      "PREBIOTI-X51": 2,
+      "CARDIO-P-HC3": 19,
+      "FAST-BRA-QCF": 1
+    },
+    {
+      "id": "TARIJA",
+      "FAST-BRA-QCF": 4,
+      "FLEX-CAP-B6L": 11,
+      "PREBIOTI-X51": 3,
+      "CARDIO-P-HC3": 3,
+      "SERENI-T-9BU": 10,
+      "MENO-PAU-UTH": 7
+    }
+  ]
+}

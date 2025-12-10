@@ -1,6 +1,19 @@
+/* Feedback animado para botones en móvil */
+@media (max-width: 768px) {
+	.btn-animated:active {
+		transform: scale(0.96);
+		box-shadow: 0 2px 12px 0 #e7922b44;
+		filter: brightness(1.08);
+		transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+	}
+}
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Toast animation */
+.animate-slide-in-right { animation: slide-in-right 0.35s cubic-bezier(.4,.0,.2,1); }
+@keyframes slide-in-right { from { transform: translateX(40px); opacity:0 } to { transform: translateX(0); opacity:1 } }
 
 /* Scrollbars sutiles */
 * { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
@@ -13,9 +26,89 @@
 	--c-accent: #ea9216;
 	--c-dark: #3a4750;
 	--c-darker: #313841;
+	--bottom-nav-h: 64px;
 }
 
-body { background: var(--c-light); color: var(--c-darker); font-feature-settings: "ss01"; }
+/* Fondo global adaptado a tema oscuro de la app principal evitando flashes blancos al hacer overscroll en mobile */
+html, body { background:#121f27; }
+body { color: var(--c-light); font-feature-settings: "ss01"; overscroll-behavior-y: contain; }
+/* iOS safari reduce white flash al rebote */
+body { -webkit-overflow-scrolling: touch; }
+
+/* Utilidad para vistas con mucho scroll que necesitaban evitar fondo blanco detrás */
+.safe-scroll-bg { background:#121f27; min-height:100%; }
+
+/* Espacio seguro inferior para vistas (usar className "pb-safe" en contenedores) */
+.pb-safe { padding-bottom: 120px; }
+@media (max-width: 640px) {
+	.pb-safe { padding-bottom: 500px; }
+}
+
+/* Barra inferior estática (sin animaciones ni desplazamientos) */
+.bottom-nav-static button { 
+	transition:none !important;
+	transform:none !important;
+	will-change: auto !important;
+	background:transparent !important;
+}
+.bottom-nav-static button:active { transform:none !important; box-shadow:none !important; }
+.bottom-nav-static button:focus { outline:none !important; }
+.bottom-nav-static button:hover { color:inherit !important; }
+.bottom-nav-static { contain:layout paint; }
+
+/* --- Mejora de áreas táctiles en móvil (solo pantallas pequeñas) --- */
+@media (max-width: 640px) {
+	/* Botones más cómodos para tap */
+	button, .btn-primary, .btn-secondary, .btn-outline {
+		min-height: 44px; /* recomendación accesibilidad */
+		padding: 0.85rem 1.15rem;
+		font-size: 0.95rem;
+		line-height: 1.2;
+	}
+	/* Inputs más grandes y fáciles de tocar */
+	input, select, textarea {
+		min-height: 44px;
+		padding: 0.75rem 0.9rem;
+		font-size: 1rem;
+	}
+	/* Icon buttons muy pequeños (p-1 / p-2) aumentan área activa sin cambiar diseño visual notable */
+	button.p-1, button.p-2 {
+		padding: 0.55rem !important;
+	}
+	/* Tablas: reducir densidad tipográfica en móvil para caber mejor */
+	table th, table td { padding: 0.5rem 0.4rem; }
+	table { font-size: 12px; }
+	/* Evitar que tarjetas estrechas colapsen demasiado */
+	.card, .card-flat { border-radius: 1rem; }
+
+		/* Animación de despliegue vertical para el menú móvil */
+		.mobile-sidebar-enter {
+			opacity: 0;
+			max-height: 0;
+			transform: translateY(-16px);
+			transition: max-height 1s cubic-bezier(.4,0,.2,1), opacity 1s, transform 1s;
+		}
+		.mobile-sidebar-enter-active {
+			opacity: 1;
+			max-height: 1200px;
+			transform: translateY(0);
+		}
+		.mobile-sidebar-leave {
+			opacity: 1;
+			max-height: 1200px;
+			transform: translateY(0);
+			transition: max-height 0.5s cubic-bezier(.4,0,.2,1), opacity 0.5s, transform 0.5s;
+		}
+		.mobile-sidebar-leave-active {
+			opacity: 0;
+			max-height: 0;
+			transform: translateY(-16px);
+		}
+
+	/* Hint de scroll horizontal reusable */
+	.table-scroll-wrapper { position:relative; }
+	.table-scroll-wrapper:before { content:'Desliza ↔'; position:absolute; left:0; top:-18px; font-size:10px; color:#6b7280; }
+}
 
 /* Animación semáforo rojo parpadeo/pulso */
 @keyframes alertPulse {
@@ -23,6 +116,27 @@ body { background: var(--c-light); color: var(--c-darker); font-feature-settings
 	50% { transform: scale(1.35); box-shadow:0 0 0 6px rgba(220,38,38,0); }
 }
 .blink-red { animation: alertPulse 1.2s ease-in-out infinite; }
+
+/* Hint scroll horizontal animado y sombras laterales en tablas móviles */
+.scroll-hint-enter { animation: scrollHintPulse 1.8s ease-in-out 0.3s 1 forwards; }
+@keyframes scrollHintPulse {
+	0% { opacity:0; transform: translateX(0); }
+	15% { opacity:1; }
+	40% { opacity:1; transform: translateX(6px); }
+	65% { opacity:1; transform: translateX(0); }
+	90% { opacity:.6; }
+	100% { opacity:0; }
+}
+.scroll-hint-hidden { display:none !important; }
+.overflow-x-auto.scrollable-shadow { position:relative; }
+.overflow-x-auto.scrollable-shadow:before,
+.overflow-x-auto.scrollable-shadow:after { content:''; position:absolute; top:0; bottom:0; width:18px; pointer-events:none; transition:opacity .35s; opacity:0; }
+.overflow-x-auto.scrollable-shadow:before { left:0; background:linear-gradient(to right, rgba(231,146,43,0.35), rgba(231,146,43,0)); }
+.overflow-x-auto.scrollable-shadow:after { right:0; background:linear-gradient(to left, rgba(231,146,43,0.35), rgba(231,146,43,0)); }
+.overflow-x-auto.scrollable-shadow.scrolling-left:before { opacity:1; }
+.overflow-x-auto.scrollable-shadow.scrolling-right:after { opacity:1; }
+.overflow-x-auto.scrollable-shadow.scrolling-both:before,
+.overflow-x-auto.scrollable-shadow.scrolling-both:after { opacity:1; }
 
 /* Utilidades custom (sin @apply para evitar warnings del analizador actual) */
 .btn-primary { background:#ea9216; color:#313841; font-weight:600; border-radius:0.75rem; padding:0.55rem 1rem; transition:.2s background, .2s transform; box-shadow:0 2px 4px -2px #000,0 4px 12px -4px rgba(0,0,0,.4); }

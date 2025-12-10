@@ -108,3 +108,4 @@ Después del deploy, verifica:
 **Fecha**: $(Get-Date -Format "yyyy-MM-dd")
 **Versión**: Sistema Híbrido Firebase/Supabase v1.0
 
+

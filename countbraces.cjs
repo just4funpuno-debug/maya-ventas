@@ -1,0 +1,1 @@
+const fs=require('fs');try{const p='E:/MAYA LIFE AND BEAUTY/INVENTARIO VENTAS/maya-ventas-mvp-vite-no-backticks/src/App.jsx';const txt=fs.readFileSync(p,'utf8');let o=0,c=0;for(const ch of txt){if(ch=='{')o++;else if(ch=='}')c++;}console.log('OK opens',o,'closes',c,'diff',o-c);}catch(e){console.error(e);}

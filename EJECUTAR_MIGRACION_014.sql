@@ -1,0 +1,11 @@
+-- ================================================================
+-- EJECUTAR MIGRACIÓN 014: Funciones SQL Helper para CRM de Leads
+-- ================================================================
+-- INSTRUCCIONES:
+-- 1. Asegúrate de haber ejecutado la migración 013 primero
+-- 2. Copia y pega el contenido de supabase/migrations/014_whatsapp_leads_functions.sql
+-- 3. Ejecuta el script completo
+-- 4. Verifica que no haya errores
+-- 5. Ejecuta scripts/test-leads-functions.sql para testing
+-- ================================================================
+

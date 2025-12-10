@@ -44,6 +44,7 @@ create table if not exists sales (
   total numeric(12,2),
   vendedora text,
   vendedora_id uuid references users(id) on update cascade on delete set null,
+  celular text,
   metodo text,
   cliente text,
   notas text,

@@ -69,7 +69,7 @@ create policy sales_owner_rw on sales for select using (
   exists (select 1 from users u where u.auth_id = auth.uid() and sales.vendedora_id = u.id)
 );
 create policy sales_owner_insert on sales for insert with check (
-  exists (select 1 from users u where u.auth_id = auth.uid() and new.vendedora_id = u.id)
+  exists (select 1 from users u where u.auth_id = auth.uid() and sales.vendedora_id = u.id)
 );
 create policy sales_owner_update on sales for update using (
   exists (select 1 from users u where u.auth_id = auth.uid() and sales.vendedora_id = u.id)

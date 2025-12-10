@@ -1,0 +1,12 @@
+{
+	"name": "MAYA Ventas",
+	"short_name": "MAYA",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#121f27",
+	"theme_color": "#121f27",
+	"description": "Gestión de ventas MAYA",
+		"icons": [
+			{ "src": "/favicon.png", "sizes": "64x64 32x32 16x16", "type": "image/png", "purpose": "any" }
+		]
+}

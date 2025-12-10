@@ -1,0 +1,70 @@
+{
+  "collection": "users",
+  "timestamp": "2025-11-28T20:14:01.628Z",
+  "count": 3,
+  "documents": [
+    {
+      "id": "KKGaoOnj8OZffYrh4Bsw5afEFfr2",
+      "username": "mariela",
+      "rol": "seller",
+      "createdAt": "2025-09-11T18:29:26.464Z",
+      "apellidos": " ",
+      "fechaIngreso": "2023-09-15",
+      "grupo": "A",
+      "celular": "73778369",
+      "sueldo": 1400,
+      "diaPago": 10,
+      "nombre": "Mariela",
+      "productos": [
+        "FLEX-CAP-B6L",
+        "VITA-LEG-GUA",
+        "PREBIOTI-X51",
+        "SERENI-T-9BU",
+        "FAST-BRA-QCF",
+        "DELIVERY-GYS",
+        "MENO-PAU-UTH",
+        "CARDIO-P-HC3"
+      ],
+      "updatedAt": "2025-09-11T18:29:27.987Z"
+    },
+    {
+      "id": "PbF3ViflCCN80SWkwb3VN4EHtSX2",
+      "username": "pedroadmin",
+      "rol": "admin",
+      "createdAt": " 2025-09-04T00:00:00Z",
+      "apellidos": "Arosquioa",
+      "fechaIngreso": "2025-09-07",
+      "grupo": "",
+      "celular": "",
+      "sueldo": 0,
+      "diaPago": 7,
+      "nombre": "Pedro",
+      "productos": [],
+      "updatedAt": "2025-09-07T13:33:54.995Z"
+    },
+    {
+      "id": "tbaWOwImgYeNhVjG2q7YKL5pFaA2",
+      "username": "wendy",
+      "rol": "seller",
+      "createdAt": "2025-09-11T17:17:11.846Z",
+      "apellidos": "Arce Valdivia",
+      "fechaIngreso": "2025-09-11",
+      "grupo": "A",
+      "celular": "74331013",
+      "nombre": "Wendy Nayeli ",
+      "productos": [
+        "DELIVERY-GYS",
+        "MENO-PAU-UTH",
+        "CARDIO-P-HC3",
+        "FAST-BRA-QCF",
+        "SERENI-T-9BU",
+        "PREBIOTI-X51",
+        "VITA-LEG-GUA",
+        "FLEX-CAP-B6L"
+      ],
+      "sueldo": 1320,
+      "diaPago": 7,
+      "updatedAt": "2025-10-10T21:36:25.495Z"
+    }
+  ]
+}

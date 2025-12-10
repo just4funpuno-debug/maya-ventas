@@ -1,0 +1,73 @@
+{
+  "timestamp": "2025-11-28T20:14:06.568Z",
+  "totalCollections": 11,
+  "totalDocuments": 553,
+  "results": [
+    {
+      "collection": "almacenCentral",
+      "count": 8,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\almacenCentral-1764360823569.json",
+      "success": true
+    },
+    {
+      "collection": "cityStock",
+      "count": 8,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\cityStock-1764360824589.json",
+      "success": true
+    },
+    {
+      "collection": "VentasSinConfirmar",
+      "count": 12,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\VentasSinConfirmar-1764360825679.json",
+      "success": true
+    },
+    {
+      "collection": "ventashistorico",
+      "count": 412,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\ventashistorico-1764360837949.json",
+      "success": true
+    },
+    {
+      "collection": "ventasporcobrar",
+      "count": 45,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\ventasporcobrar-1764360839440.json",
+      "success": true
+    },
+    {
+      "collection": "GenerarDeposito",
+      "count": 24,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\GenerarDeposito-1764360840610.json",
+      "success": true
+    },
+    {
+      "collection": "users",
+      "count": 3,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\users-1764360841628.json",
+      "success": true
+    },
+    {
+      "collection": "despachos",
+      "count": 0,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\despachos-1764360842676.json",
+      "success": true
+    },
+    {
+      "collection": "despachosHistorial",
+      "count": 31,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\despachosHistorial-1764360843906.json",
+      "success": true
+    },
+    {
+      "collection": "numbers",
+      "count": 10,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\numbers-1764360844946.json",
+      "success": true
+    },
+    {
+      "collection": "team_messages",
+      "count": 0,
+      "filename": "E:\\MAYA LIFE AND BEAUTY\\INVENTARIO VENTAS\\maya-ventas-mvp-vite-no-backticks\\backups\\team_messages-1764360846062.json",
+      "success": true
+    }
+  ]
+}

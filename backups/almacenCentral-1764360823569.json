@@ -1,0 +1,102 @@
+{
+  "collection": "almacenCentral",
+  "timestamp": "2025-11-28T20:13:43.568Z",
+  "count": 8,
+  "documents": [
+    {
+      "id": "1VVNenMgTJEAKt2jxCA8",
+      "sku": "FLEX-CAP-B6L",
+      "nombre": "FLEX CAPS",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594077/maya-productos/wetpvzdln64jldle7exy.jpg",
+      "createdAt": 1757594075009,
+      "delivery": 20,
+      "precioPar": 350,
+      "stock": 198
+    },
+    {
+      "id": "1gtGn8dn3jXQTQpkLAun",
+      "sku": "VITA-LEG-GUA",
+      "nombre": "VITA LEGS",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594008/maya-productos/kjoy9zbtitxsbo611p1x.jpg",
+      "createdAt": 1757594005337,
+      "delivery": 20,
+      "precioPar": 350,
+      "stock": 156
+    },
+    {
+      "id": "7zzcbuUNppMZljmHHenf",
+      "sku": "PREBIOTI-X51",
+      "nombre": "PREBIOTIC FRESH",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594141/maya-productos/ninvf0qzu79eltrdiuzj.jpg",
+      "createdAt": 1757594138828,
+      "delivery": 20,
+      "precioPar": 300,
+      "stock": 0
+    },
+    {
+      "id": "VSJ2FnP55gjDCu3Cimwr",
+      "sku": "SERENI-T-9BU",
+      "nombre": "SERENI TEA",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594121/maya-productos/xlhyual7pcmhgyh3axuj.jpg",
+      "createdAt": 1757594118513,
+      "delivery": 20,
+      "precioPar": 250,
+      "stock": 5
+    },
+    {
+      "id": "X7sZA8tYv7zcvA26EiVq",
+      "sku": "FAST-BRA-QCF",
+      "nombre": "FAST BRAIN",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594036/maya-productos/twlfman2cs9bap7bd7hk.jpg",
+      "createdAt": 1757594033364,
+      "delivery": 20,
+      "precioPar": 350,
+      "stock": 0
+    },
+    {
+      "id": "dCBeAUsi3uNS19tDD5qC",
+      "sku": "CARDIO-P-HC3",
+      "nombre": "CARDIO PLUS",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594191/maya-productos/zjijwc6ss3lx5l21ybtx.jpg",
+      "createdAt": 1757594188759,
+      "delivery": 20,
+      "precioPar": 300,
+      "stock": 4
+    },
+    {
+      "id": "n3guq0BwbaJi8tkEhR8Y",
+      "sku": "MENO-PAU-UTH",
+      "nombre": "MENO PAUSE",
+      "precio": 0,
+      "costo": 0,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594096/maya-productos/ajm3tj1u21ok9j3odgtm.jpg",
+      "createdAt": 1757594093815,
+      "delivery": 20,
+      "precioPar": 350,
+      "stock": 69
+    },
+    {
+      "id": "qdVFfpnchDn3qBrRZSMS",
+      "sku": "DELIVERY-GYS",
+      "nombre": "DELIVERY",
+      "precio": 0,
+      "costo": 0,
+      "stock": 0,
+      "sintetico": true,
+      "imagen": "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757594208/maya-productos/pbqqhxtktu1aqzhaujt1.jpg",
+      "createdAt": 1757594205982
+    }
+  ]
+}

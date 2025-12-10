@@ -1,0 +1,106 @@
+{
+  "collection": "numbers",
+  "timestamp": "2025-11-28T20:14:04.946Z",
+  "count": 10,
+  "documents": [
+    {
+      "id": "5OyURdXPnQzBfMXaf8Us",
+      "sku": "VITA-LEG-GUA",
+      "nombreOtro": null,
+      "telefonia": "Viva",
+      "celular": "65241332",
+      "createdAt": "2025-09-11T22:06:01.793Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-07T03:20:19.071Z"
+    },
+    {
+      "id": "8OSrtTz5QMGUZpmsK0kK",
+      "sku": "FAST-BRA-QCF",
+      "nombreOtro": null,
+      "telefonia": "Viva",
+      "celular": "60360963",
+      "createdAt": "2025-09-11T22:07:51.355Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-06T18:18:35.287Z"
+    },
+    {
+      "id": "K96TN2hUZ5uGb11P2gcS",
+      "sku": "PREBIOTI-X51",
+      "nombreOtro": null,
+      "telefonia": "Viva",
+      "celular": "60343473",
+      "createdAt": "2025-09-11T22:04:49.838Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-06T18:26:18.533Z"
+    },
+    {
+      "id": "KSmwg1PL7fMZMsCALLeK",
+      "telefonia": "Viva",
+      "celular": "60343443",
+      "createdAt": "2025-09-11T22:07:15.352Z",
+      "caduca": "2026-01-05",
+      "nombreOtro": "SIN PRODUCTO",
+      "sku": "otros",
+      "updatedAt": "2025-11-10T03:29:15.761Z"
+    },
+    {
+      "id": "VA08ZtOyvZNdXoyDUXnp",
+      "sku": "otros",
+      "nombreOtro": "AHORRO365",
+      "telefonia": "VIVA",
+      "celular": "60360908",
+      "createdAt": "2025-11-06T13:04:54.744Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-06T13:07:31.863Z"
+    },
+    {
+      "id": "XlDQN3YdHLw8Hla29714",
+      "sku": "MENO-PAU-UTH",
+      "nombreOtro": null,
+      "telefonia": "VIVA",
+      "celular": "60716932",
+      "caduca": "2025-12-02",
+      "createdAt": "2025-11-10T03:30:02.668Z"
+    },
+    {
+      "id": "b4VhJ5mrwmjWPc1UWrO2",
+      "sku": "otros",
+      "nombreOtro": "Mario",
+      "telefonia": "Viva",
+      "celular": "60360903",
+      "createdAt": "2025-09-11T22:09:01.816Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-06T13:43:33.496Z"
+    },
+    {
+      "id": "h4k900PZMOoxgT5Fq3mi",
+      "sku": "FLEX-CAP-B6L",
+      "nombreOtro": null,
+      "telefonia": "Viva",
+      "celular": "60360962",
+      "createdAt": "2025-09-11T21:53:11.309Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-06T13:39:05.117Z"
+    },
+    {
+      "id": "kLnUx4zukl1c1BnH0vQ6",
+      "sku": "CARDIO-P-HC3",
+      "nombreOtro": null,
+      "telefonia": "Viva",
+      "celular": "61613491",
+      "createdAt": "2025-09-11T21:40:40.133Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-06T13:47:09.254Z"
+    },
+    {
+      "id": "psYjQbNKhNGPJNAP7R2G",
+      "sku": "SERENI-T-9BU",
+      "nombreOtro": null,
+      "telefonia": "Viva",
+      "celular": "60360907",
+      "createdAt": "2025-09-11T22:03:51.525Z",
+      "caduca": "2026-01-05",
+      "updatedAt": "2025-11-07T03:20:10.947Z"
+    }
+  ]
+}

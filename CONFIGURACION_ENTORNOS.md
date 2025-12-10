@@ -129,3 +129,4 @@ const firebaseConfig = {
 **Última actualización**: 2025-01-27
 **Estado**: Sistema híbrido funcionando - Supabase en dev, Firebase en prod
 
+

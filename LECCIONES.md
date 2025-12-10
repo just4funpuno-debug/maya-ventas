@@ -1,3 +1,101 @@
+## 16. Problema de tabla de ventas vacía y migración fallida a router
+
+**Síntoma:**
+
+- El menú “ventas” no mostraba la tabla ni logs, aunque los datos en Firestore eran correctos.
+- Al intentar migrar a rutas modernas (react-router), la app mostraba errores de importación y pantalla rota.
+
+**Causas:**
+
+1. El punto de entrada (`main.jsx`) montaba directamente `App.jsx`, que usaba navegación interna por estado (`view`), ignorando el router y las rutas modernas.
+2. Al intentar usar el router, faltaban archivos requeridos (`AuthPage.jsx`, `DashboardPage.jsx`, etc.), lo que rompía la app.
+3. La lógica de filtrado y normalización de ventasporcobrar en la vista de ventas no era idéntica a la de historial, lo que podía dejar la tabla vacía.
+
+**Solución aplicada:**
+
+- Se restauró el punto de entrada original: `main.jsx` monta solo `App.jsx`, eliminando el router y archivos de rutas modernas.
+- Se normalizó y corrigió el filtro de ventasporcobrar en la vista de ventas para igualar la lógica de historial.
+- Se eliminaron archivos y stubs innecesarios del router.
+- Se validó que la tabla y los logs aparecieran correctamente.
+
+**Lección:**
+
+- Si la app depende de navegación interna por estado, no migrar a router hasta tener todos los componentes y rutas listos.
+- Mantener la lógica de filtrado y normalización consistente entre vistas.
+- Si la UI desaparece tras una migración, revisar el punto de entrada y los imports rotos.
+
+**Indicador de éxito:**
+
+- La tabla de ventas vuelve a mostrarse y funcionar igual que antes, con todos los datos y logs visibles.
+
+---
+
+### Patrón recomendado: endpoints API universales (local + serverless)
+
+Para que el frontend funcione igual en desarrollo local y en Vercel (o cualquier plataforma serverless), define los endpoints API como rutas relativas (ej: `/api/cloudinary-signature`).
+
+- En local, usa un middleware o proxy en Vite que responda en esa ruta (ver ejemplo en `vite.config.js`).
+- En producción (Vercel), crea una función serverless en la carpeta `/api` con el mismo nombre y lógica.
+- Configura la variable de entorno en el frontend como:
+  ```
+  VITE_CLOUDINARY_SIGNATURE_URL=/api/cloudinary-signature
+  ```
+- Así, el frontend nunca necesita saber si está en local o en la nube: siempre usa la misma ruta.
+
+Ventajas:
+
+- Cero cambios de código ni de variables entre entornos.
+- Menos errores de CORS y configuración.
+- Más fácil de testear y mantener.
+
+Este patrón es aplicable a cualquier endpoint que debas exponer tanto en local como en serverless (firmas, borrados, uploads, etc).
+
+## 15. Integración local Cloudinary/Express/Vite: errores y solución
+
+**Síntoma:**
+
+- El frontend (Vite/React) no podía comunicarse con el backend local de firmas Cloudinary (Express), mostrando errores de CORS, conexión rechazada o URLs incorrectas.
+- El backend se cerraba inesperadamente o no quedaba escuchando en el puerto 4000.
+- La variable `VITE_CLOUDINARY_SIGNATURE_URL` estaba mal configurada, apuntando a una ruta inválida.
+
+**Errores observados:**
+
+- `Access to fetch at ... has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present ...`
+- `net::ERR_CONNECTION_REFUSED`
+- `Cannot GET /api/cloudinary-signature` (cuando el backend está prendido y la ruta es GET)
+- `No se puede acceder a este sitio` (cuando el backend está apagado)
+- `404 (Not Found)` por URL mal formada en el frontend
+
+**Causas y pasos de depuración:**
+
+1. El backend Express se cerraba porque el script tenía errores o el proceso terminaba inesperadamente. Se simplificó el archivo hasta un servidor mínimo y se fue agregando funcionalidad paso a paso.
+2. El middleware de CORS debe estar antes de las rutas y correctamente implementado (se usó manual, no el paquete `cors`).
+3. La variable de entorno `VITE_CLOUDINARY_SIGNATURE_URL` debe apuntar exactamente a `http://localhost:4000/api/cloudinary-signature`.
+4. Cada vez que se cambia `.env.local`, es obligatorio reiniciar el servidor de Vite para que tome los nuevos valores.
+5. Se recomienda tener dos terminales: una para el backend (`node scripts/cloudinary-signature-server.cjs`) y otra para el frontend (`npm run dev -- --host`).
+6. Si el backend responde con `Cannot GET ...` es normal para rutas GET en endpoints POST.
+
+**Solución aplicada:**
+
+- Se depuró el backend Express hasta que quedó estable y escuchando correctamente.
+- Se corrigió la variable `VITE_CLOUDINARY_SIGNATURE_URL` en `.env.local`.
+- Se reinició el frontend tras cada cambio de entorno.
+- Se validó la comunicación revisando los logs de CORS y las respuestas del backend.
+
+**Prevención futura:**
+
+- Siempre probar el backend con un endpoint mínimo antes de agregar lógica compleja.
+- Documentar y validar las URLs de entorno antes de hacer pruebas de integración.
+- Usar logs claros en backend para saber si Express está escuchando y recibiendo peticiones.
+- Si hay errores de CORS, revisar primero el orden de los middlewares y la URL de destino.
+
+**Indicador de éxito:**
+
+- El backend queda corriendo y responde a `/` con `OK`.
+- El frontend puede subir imágenes y recibe la firma correctamente desde el backend local.
+
+¡Lección aprendida y proceso documentado para futuros proyectos!
+
 # Lecciones Aprendidas / Errores Frecuentes
 
 Documento para futuros proyectos: checklist de cosas que fallaron aquí y cómo evitarlas.
@@ -160,3 +258,37 @@ Pendientes / mejoras futuras:
 - Tests E2E: crear → eliminar → confirmar no reaparición tras 2 ciclos de sync.
 
 Lección: El patrón de snapshot + upsert necesita DELETE remoto verificado y (idealmente) un mecanismo anti-resurrección (tombstones / reconciliación inversa).
+
+## Lección: Edición sincronizada de ventas en el menú "Ventas"
+
+- Solo la tabla del menú "Ventas" permite editar ventas confirmadas.
+- Al editar una venta desde este menú:
+  - Los cambios se reflejan automáticamente en ambas colecciones de Firestore: `ventasporcobrar` y `ventashistorico`.
+  - El stock de productos en `cityStock` se ajusta automáticamente:
+    - Si se quitan productos, se restauran en el stock de la ciudad.
+    - Si se aumentan productos, se descuentan del stock de la ciudad.
+  - La venta no reaparece en `VentasSinConfirmar`.
+  - El flujo es seguro y atómico para evitar inconsistencias.
+
+**Patrón recomendado:**
+Siempre que se requiera mantener consistencia entre colecciones y stock, centralizar la lógica de edición en una función que actualice ambas colecciones y ajuste el stock según la diferencia de productos.
+
+## Patrón: Eliminación segura de ventas confirmadas
+
+Cuando se elimina una venta confirmada desde el modal de edición:
+
+- Se elimina el documento correspondiente en las colecciones `ventasporcobrar` y `ventashistorico`.
+- Se restaura el stock de los productos involucrados en la colección `cityStock` (tanto producto principal como extra, si aplica).
+- La venta no reaparece en `VentasSinConfirmar`.
+- El flujo es seguro y atómico para evitar inconsistencias.
+
+**Implementación:**
+
+- La función `eliminarVentaConfirmada` (en `src/eliminarVentaConfirmada.js`) realiza la eliminación y restauración de stock.
+- El botón "Eliminar" del modal de edición llama a esta función si la venta es confirmada.
+- Para ventas pendientes, se usa `eliminarVentaPendiente` y solo afecta `VentasSinConfirmar` y el stock.
+
+**Recomendación:**
+
+- Siempre confirmar visualmente antes de eliminar.
+- Documentar en el historial de cambios cualquier eliminación relevante para auditoría.

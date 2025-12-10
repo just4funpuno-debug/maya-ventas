@@ -1,0 +1,785 @@
+{
+  "collection": "despachosHistorial",
+  "timestamp": "2025-11-28T20:14:03.905Z",
+  "count": 31,
+  "documents": [
+    {
+      "id": "4WnqdpiyfpMtlriuEe5h",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-11-04",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 6
+        },
+        {
+          "sku": "VITA-LEG-GUA",
+          "cantidad": 6
+        }
+      ],
+      "creadoAt": 1762275029546,
+      "status": "confirmado",
+      "confirmadoAt": "2025-11-04T16:50:38.106Z"
+    },
+    {
+      "id": "4m59DWZ4rii9DarUGY5E",
+      "ciudad": "SUCRE",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 7
+        },
+        {
+          "sku": "VITA-LEG-GUA",
+          "cantidad": 10
+        },
+        {
+          "sku": "PREBIOTI-X51",
+          "cantidad": 6
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 17
+        },
+        {
+          "cantidad": 10,
+          "sku": "FAST-BRA-QCF"
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 10
+        }
+      ],
+      "creadoAt": 1757595299559,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:55:14.176Z"
+    },
+    {
+      "id": "6wQ0wFz05DbhhfJdIxoE",
+      "ciudad": "EL ALTO",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "cantidad": 8,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 9,
+          "sku": "VITA-LEG-GUA"
+        },
+        {
+          "sku": "PREBIOTI-X51",
+          "cantidad": 4
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 7
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 12
+        },
+        {
+          "cantidad": 1,
+          "sku": "CARDIO-P-HC3"
+        },
+        {
+          "cantidad": 13,
+          "sku": "MENO-PAU-UTH"
+        }
+      ],
+      "creadoAt": 1757594324126,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:52:37.638Z"
+    },
+    {
+      "id": "6ybd7yyMLJIL1BOrb69W",
+      "ciudad": "EL ALTO",
+      "fecha": "2025-10-27",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 15
+        },
+        {
+          "sku": "VITA-LEG-GUA",
+          "cantidad": 10
+        },
+        {
+          "sku": "CARDIO-P-HC3",
+          "cantidad": 23
+        }
+      ],
+      "creadoAt": 1761594912954,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-29T17:05:26.789Z"
+    },
+    {
+      "id": "7H6FDuHlt1Ucbo34hKeU",
+      "ciudad": "POTOSI",
+      "fecha": "2025-10-06",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 5
+        },
+        {
+          "cantidad": 10,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 6
+        }
+      ],
+      "creadoAt": 1759782330383,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-07T22:36:22.682Z"
+    },
+    {
+      "id": "8JHUqk3mfVsoG9hz95yz",
+      "ciudad": "SUCRE",
+      "fecha": "2025-10-27",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 14
+        },
+        {
+          "sku": "VITA-LEG-GUA",
+          "cantidad": 10
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 5
+        },
+        {
+          "sku": "CARDIO-P-HC3",
+          "cantidad": 19
+        }
+      ],
+      "creadoAt": 1761595371725,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-28T22:26:40.294Z"
+    },
+    {
+      "id": "8P7mMDPJDsi82q9gu86P",
+      "ciudad": "LA PAZ",
+      "fecha": "2025-09-12",
+      "items": [
+        {
+          "cantidad": 30,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "cantidad": 8,
+          "sku": "FAST-BRA-QCF"
+        }
+      ],
+      "creadoAt": 1757716984774,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-15T17:03:14.194Z"
+    },
+    {
+      "id": "GP7a90u8k0U5MZ7Hv4AA",
+      "ciudad": "SANTA CRUZ",
+      "fecha": "2025-10-06",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 20
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 20
+        },
+        {
+          "cantidad": 8,
+          "sku": "CARDIO-P-HC3"
+        }
+      ],
+      "creadoAt": 1759781980924,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-08T01:10:16.356Z"
+    },
+    {
+      "id": "JKi3sch9pePfig1mGm8x",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-10-24",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 10
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 4
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 6
+        },
+        {
+          "sku": "CARDIO-P-HC3",
+          "cantidad": 10
+        }
+      ],
+      "creadoAt": 1761358144596,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-25T02:09:12.996Z"
+    },
+    {
+      "id": "Jh3p30fvosQyHhw1v8lF",
+      "ciudad": "POTOSI",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "cantidad": 10,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 5,
+          "sku": "VITA-LEG-GUA"
+        },
+        {
+          "cantidad": 6,
+          "sku": "PREBIOTI-X51"
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 7
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 9
+        },
+        {
+          "cantidad": 4,
+          "sku": "CARDIO-P-HC3"
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 12
+        }
+      ],
+      "creadoAt": 1757594468153,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:52:38.732Z"
+    },
+    {
+      "id": "KXpyS58Ac3UGjCQgvSIp",
+      "ciudad": "POTOSI",
+      "fecha": "2025-09-23",
+      "items": [
+        {
+          "cantidad": 5,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 12,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 4
+        }
+      ],
+      "creadoAt": 1758657332613,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-26T20:38:06.886Z"
+    },
+    {
+      "id": "L5jFRspJKoIN17IrAzoO",
+      "ciudad": "LA PAZ",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "cantidad": 19,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "sku": "VITA-LEG-GUA",
+          "cantidad": 15
+        },
+        {
+          "cantidad": 10,
+          "sku": "PREBIOTI-X51"
+        },
+        {
+          "cantidad": 11,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "cantidad": 14,
+          "sku": "FAST-BRA-QCF"
+        },
+        {
+          "cantidad": 19,
+          "sku": "MENO-PAU-UTH"
+        }
+      ],
+      "creadoAt": 1757594419822,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:52:42.574Z"
+    },
+    {
+      "id": "RFwtwf7UVp3eaLbKXMu3",
+      "ciudad": "SANTA CRUZ",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 17
+        },
+        {
+          "sku": "VITA-LEG-GUA",
+          "cantidad": 11
+        },
+        {
+          "cantidad": 8,
+          "sku": "PREBIOTI-X51"
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 23
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 9
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 16
+        }
+      ],
+      "creadoAt": 1757595365935,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:57:11.089Z"
+    },
+    {
+      "id": "RKAxE6hMmsjqU7GbiaW7",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-10-10",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 3
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 10
+        }
+      ],
+      "creadoAt": 1760118776077,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-10T17:59:04.749Z"
+    },
+    {
+      "id": "Sg3g1GH1cOkVj7NoP6jr",
+      "ciudad": "TARIJA",
+      "fecha": "2025-09-26",
+      "items": [
+        {
+          "sku": "PREBIOTI-X51",
+          "cantidad": 3
+        },
+        {
+          "sku": "CARDIO-P-HC3",
+          "cantidad": 3
+        }
+      ],
+      "creadoAt": 1758919674363,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-26T20:48:00.440Z"
+    },
+    {
+      "id": "Ta9WrkGIHUw3S0LQK8jO",
+      "ciudad": "ORURO",
+      "fecha": "2025-10-13",
+      "items": [
+        {
+          "cantidad": 12,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 10
+        },
+        {
+          "cantidad": 8,
+          "sku": "FAST-BRA-QCF"
+        },
+        {
+          "cantidad": 7,
+          "sku": "CARDIO-P-HC3"
+        }
+      ],
+      "creadoAt": 1760389337178,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-14T15:24:52.286Z"
+    },
+    {
+      "id": "VSbBbnJ0hOwlqDeQGANN",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-11-12",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 10
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 8
+        }
+      ],
+      "creadoAt": 1762983407020,
+      "status": "confirmado",
+      "confirmadoAt": "2025-11-12T21:36:54.177Z"
+    },
+    {
+      "id": "WlwLMZkwYDoyjXAym9bx",
+      "ciudad": "EL ALTO",
+      "fecha": "2025-11-10",
+      "items": [
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 20
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 5
+        }
+      ],
+      "creadoAt": 1762795796441,
+      "status": "confirmado",
+      "confirmadoAt": "2025-11-10T17:30:02.885Z"
+    },
+    {
+      "id": "WsBaTTfnXDItIgSZibkg",
+      "ciudad": "SANTA CRUZ",
+      "fecha": "2025-09-23",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 6
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 24
+        },
+        {
+          "cantidad": 16,
+          "sku": "FAST-BRA-QCF"
+        }
+      ],
+      "creadoAt": 1758656954414,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-25T17:07:54.803Z"
+    },
+    {
+      "id": "X98128PfGQXxxdw0mIXJ",
+      "ciudad": "SANTA CRUZ",
+      "fecha": "2025-10-16",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 12
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 20
+        },
+        {
+          "cantidad": 8,
+          "sku": "CARDIO-P-HC3"
+        }
+      ],
+      "creadoAt": 1760649778223,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-17T18:24:50.530Z"
+    },
+    {
+      "id": "aixIPgD2ilWvUMBUSStT",
+      "ciudad": "ORURO",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "cantidad": 8,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 2,
+          "sku": "VITA-LEG-GUA"
+        },
+        {
+          "cantidad": 6,
+          "sku": "PREBIOTI-X51"
+        },
+        {
+          "cantidad": 10,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "cantidad": 8,
+          "sku": "FAST-BRA-QCF"
+        },
+        {
+          "sku": "CARDIO-P-HC3",
+          "cantidad": 2
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 6
+        }
+      ],
+      "creadoAt": 1757595235197,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:55:10.908Z"
+    },
+    {
+      "id": "f7jsC2jRBn19iohI4yde",
+      "ciudad": "LA PAZ",
+      "fecha": "2025-10-16",
+      "items": [
+        {
+          "cantidad": 8,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 16,
+          "sku": "FAST-BRA-QCF"
+        },
+        {
+          "cantidad": 16,
+          "sku": "CARDIO-P-HC3"
+        }
+      ],
+      "creadoAt": 1760648820550,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-17T19:43:14.713Z"
+    },
+    {
+      "id": "gyZR07MmKt18fqaA7DHj",
+      "ciudad": "SANTA CRUZ",
+      "fecha": "2025-10-21",
+      "items": [
+        {
+          "cantidad": 21,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 1
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 7
+        }
+      ],
+      "creadoAt": 1761080032206,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-22T19:44:37.557Z"
+    },
+    {
+      "id": "mP39bfKm2w8IrVGzrgdq",
+      "ciudad": "EL ALTO",
+      "fecha": "2025-09-12",
+      "items": [
+        {
+          "cantidad": 8,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 24,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "cantidad": 8,
+          "sku": "FAST-BRA-QCF"
+        }
+      ],
+      "creadoAt": 1757716117780,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-16T18:08:35.221Z"
+    },
+    {
+      "id": "oxN07Uzi7jXmolqYLPtw",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 4
+        },
+        {
+          "sku": "PREBIOTI-X51",
+          "cantidad": 7
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 4
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 2
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 8
+        }
+      ],
+      "creadoAt": 1757595408735,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:57:12.233Z"
+    },
+    {
+      "id": "pBLglAtKpc8GxSB7Td1u",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-10-04",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 10
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 14
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 2
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 2
+        }
+      ],
+      "creadoAt": 1759605048498,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-04T19:12:55.551Z"
+    },
+    {
+      "id": "uodLMKo7iPQFBMHIh1v4",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-09-16",
+      "items": [
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 7
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 6
+        },
+        {
+          "sku": "MENO-PAU-UTH",
+          "cantidad": 1
+        }
+      ],
+      "creadoAt": 1758056229770,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-16T20:57:55.145Z"
+    },
+    {
+      "id": "vR4pty3TWQP4iPU3kZnh",
+      "ciudad": "TARIJA",
+      "fecha": "2025-09-23",
+      "items": [
+        {
+          "cantidad": 11,
+          "sku": "FLEX-CAP-B6L"
+        },
+        {
+          "cantidad": 3,
+          "sku": "SERENI-T-9BU"
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 12
+        }
+      ],
+      "creadoAt": 1758658204453,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-26T13:00:57.715Z"
+    },
+    {
+      "id": "vn5BZ7SxMU8VVN0l4nOj",
+      "ciudad": "TARIJA",
+      "fecha": "2025-09-01",
+      "items": [
+        {
+          "sku": "PREBIOTI-X51",
+          "cantidad": 3
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 16
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 2
+        },
+        {
+          "sku": "CARDIO-P-HC3",
+          "cantidad": 3
+        },
+        {
+          "cantidad": 8,
+          "sku": "MENO-PAU-UTH"
+        }
+      ],
+      "creadoAt": 1757595260741,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-11T12:55:06.266Z"
+    },
+    {
+      "id": "y8YNrjBXfQ8XgGu4OUxn",
+      "ciudad": "SANTA CRUZ",
+      "fecha": "2025-10-27",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 15
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 5
+        },
+        {
+          "cantidad": 3,
+          "sku": "FAST-BRA-QCF"
+        },
+        {
+          "cantidad": 20,
+          "sku": "CARDIO-P-HC3"
+        }
+      ],
+      "creadoAt": 1761599091160,
+      "status": "confirmado",
+      "confirmadoAt": "2025-10-29T16:13:08.861Z"
+    },
+    {
+      "id": "yZ6kXU5RyI7fEI1QGsus",
+      "ciudad": "COCHABAMBA",
+      "fecha": "2025-09-24",
+      "items": [
+        {
+          "sku": "FLEX-CAP-B6L",
+          "cantidad": 10
+        },
+        {
+          "sku": "SERENI-T-9BU",
+          "cantidad": 8
+        },
+        {
+          "sku": "FAST-BRA-QCF",
+          "cantidad": 4
+        }
+      ],
+      "creadoAt": 1758744152579,
+      "status": "confirmado",
+      "confirmadoAt": "2025-09-24T20:04:06.081Z"
+    }
+  ]
+}

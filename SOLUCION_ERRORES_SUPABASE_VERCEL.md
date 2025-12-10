@@ -99,3 +99,4 @@ Pero como dijiste "vamos a seguir trabajando con supabase" solo en localhost, la
 **Fecha**: 2025-01-27
 **Estado**: Solución documentada - Pendiente eliminación de variables en Vercel
 
+

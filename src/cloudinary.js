@@ -1,8 +1,11 @@
 // Frontend helper for signed uploads to Cloudinary
 // Usage: const { secure_url, public_id } = await uploadProductImage(file, optionalPublicId)
 
+// Permite usar endpoint local en desarrollo
+const SIGNATURE_URL = import.meta.env.VITE_CLOUDINARY_SIGNATURE_URL || '/api/cloudinary-signature';
+
 export async function getSignature(params = {}) {
-  const resp = await fetch('/api/cloudinary-signature', {
+  const resp = await fetch(SIGNATURE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)

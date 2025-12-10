@@ -1,0 +1,28 @@
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package-lock.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/App.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/whatsapp/PauseStepForm.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/whatsapp/QRModal.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/whatsapp/StepTypeSelector.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/whatsapp/TemplateForm.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/whatsapp/TemplateManager.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/whatsapp/VerificationCodeModal.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/index.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/utils/authProvider.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/utils/dataProvider.js', LF will be replaced by CRLF the next time Git touches it
+.gitignore
+LECCIONES.md
+api/cloudinary-signature.js
+index.html
+package-lock.json
+package.json
+security-migration.sql
+src/App.jsx
+src/app/routes.jsx
+src/cloudinary.js
+src/components/CitySummary.jsx
+src/index.css
+src/utils/firebaseHelper.js
+supabase-schema.sql

@@ -1,0 +1,11 @@
+-- ================================================================
+-- EJECUTAR MIGRACIÓN 015: Pipelines por Defecto
+-- ================================================================
+-- INSTRUCCIONES:
+-- 1. Asegúrate de haber ejecutado las migraciones 013 y 014 primero
+-- 2. Copia y pega el contenido de supabase/migrations/015_default_pipelines.sql
+-- 3. Ejecuta el script completo
+-- 4. Verifica que no haya errores
+-- 5. Ejecuta scripts/test-default-pipelines.sql para testing
+-- ================================================================
+

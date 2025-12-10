@@ -1,0 +1,12 @@
+# Configuración de Supabase para desarrollo local
+# Este archivo es opcional si solo usas Edge Functions en producción
+
+[project]
+# Tu project ID de Supabase
+# Puedes obtenerlo desde: https://supabase.com/dashboard/project/_/settings/general
+
+[functions]
+# Configuración de Edge Functions
+# Las funciones se despliegan usando: supabase functions deploy delete-user
+
+

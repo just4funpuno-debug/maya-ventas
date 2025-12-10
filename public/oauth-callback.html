@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conectando con Meta...</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .container {
+      text-align: center;
+      padding: 2rem;
+    }
+    .spinner {
+      border: 3px solid #333;
+      border-top: 3px solid #3b82f6;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .message {
+      font-size: 14px;
+      color: #9ca3af;
+    }
+    .error {
+      color: #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <div class="message" id="message">Procesando conexión...</div>
+  </div>
+
+  <script>
+    (function() {
+      try {
+        // Procesar hash de OAuth
+        const hash = window.location.hash;
+        
+        if (hash.includes('oauth-callback=')) {
+          // OAuth exitoso
+          const encodedData = hash.split('oauth-callback=')[1].split('&')[0];
+          const data = JSON.parse(atob(encodedData));
+          
+          // Enviar mensaje al parent window
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'whatsapp_oauth_callback',
+              success: true,
+              data: data.data
+            }, window.location.origin);
+            
+            document.getElementById('message').textContent = '¡Conexión exitosa! Cerrando ventana...';
+            setTimeout(() => window.close(), 1000);
+          } else {
+            document.getElementById('message').textContent = 'Error: No se pudo comunicar con la ventana principal';
+            document.getElementById('message').className = 'message error';
+          }
+        } else if (hash.includes('oauth-error=')) {
+          // OAuth falló
+          const encodedError = hash.split('oauth-error=')[1].split('&')[0];
+          const errorData = JSON.parse(atob(encodedError));
+          
+          // Enviar mensaje de error al parent window
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'whatsapp_oauth_callback',
+              success: false,
+              error: errorData.error
+            }, window.location.origin);
+            
+            document.getElementById('message').textContent = 'Error al conectar. Cerrando ventana...';
+            document.getElementById('message').className = 'message error';
+            setTimeout(() => window.close(), 2000);
+          } else {
+            document.getElementById('message').textContent = 'Error: ' + (errorData.error?.message || 'Error desconocido');
+            document.getElementById('message').className = 'message error';
+          }
+        } else {
+          // No hay hash OAuth
+          document.getElementById('message').textContent = 'No se encontró información de OAuth';
+          document.getElementById('message').className = 'message error';
+        }
+      } catch (err) {
+        console.error('[OAuth Callback] Error procesando hash:', err);
+        document.getElementById('message').textContent = 'Error al procesar conexión: ' + err.message;
+        document.getElementById('message').className = 'message error';
+        
+        // Intentar enviar error al parent
+        if (window.opener) {
+          window.opener.postMessage({
+            type: 'whatsapp_oauth_callback',
+            success: false,
+            error: { message: err.message }
+          }, window.location.origin);
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
+
