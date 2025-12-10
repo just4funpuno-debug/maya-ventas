@@ -492,7 +492,6 @@ export async function getAllUsers() {
       console.error('[getAllUsers] Error fatal (Supabase):', err);
       return [];
     }
-  }
 }
 
 /**
