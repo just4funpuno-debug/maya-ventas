@@ -20,8 +20,23 @@ export default function SaleForm({ products, session, onSubmit, initialSku, fixe
   const [ciudadVenta, setCiudadVenta] = useState(fixedCity || ciudades[0]);
   const visibleProducts = useMemo(()=>{
     const assigned = session.productos || [];
+    // Debug: Log para diagnosticar problema en Vercel
+    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
+      console.log('[SaleForm] Debug productos:', {
+        userId: session?.id,
+        rol: session?.rol,
+        productosAssigned: assigned,
+        productosLength: assigned.length,
+        allProductsCount: products.length,
+        isAdmin: session?.rol === 'admin'
+      });
+    }
     if (session.rol === 'admin' || assigned.length === 0) return products;
-    return products.filter(p => assigned.includes(p.sku));
+    const filtered = products.filter(p => assigned.includes(p.sku));
+    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
+      console.log('[SaleForm] Productos filtrados:', filtered.length);
+    }
+    return filtered;
   }, [products, session]);
 
   const [sku, setSku] = useState(initialSku || (visibleProducts[0] ? visibleProducts[0].sku : ""));

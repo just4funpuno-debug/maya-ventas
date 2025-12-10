@@ -7675,9 +7675,24 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
   const cities = getCiudadesFiltradas(session);
   const allowed = useMemo(() => {
     const assigned = session.productos || [];
+    // Debug: Log para diagnosticar problema en Vercel
+    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
+      console.log('[RegisterSaleView] Debug productos:', {
+        userId: session?.id,
+        rol: session?.rol,
+        productosAssigned: assigned,
+        productosLength: assigned.length,
+        allProductsCount: products.length,
+        isAdmin: session?.rol === 'admin'
+      });
+    }
     // Admin o vendedor con lista vacía => todos.
     if (session.rol === 'admin' || assigned.length === 0) return products;
-    return products.filter(p => assigned.includes(p.sku));
+    const filtered = products.filter(p => assigned.includes(p.sku));
+    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
+      console.log('[RegisterSaleView] Productos filtrados:', filtered.length);
+    }
+    return filtered;
   }, [products, session]);
 
   function openSale(p){

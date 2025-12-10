@@ -1,10 +1,10 @@
 -- ============================================================================
--- MIGRACIÓN 030: Corrección de función get_next_phrase_for_user
--- Fecha: 2025-01-31
--- Descripción: Corrige el error de NULL en remaining_phrases y mejora el manejo de arrays vacíos
+-- MIGRACIÓN 032: Corrección de ambigüedad en get_next_phrase_for_user
+-- Fecha: 2025-02-01
+-- Descripción: Corrige error SQL "column reference phrase_text is ambiguous"
 -- ============================================================================
 
--- Reemplazar la función para corregir el problema de NULL
+-- Reemplazar la función para corregir la ambigüedad en phrase_text
 CREATE OR REPLACE FUNCTION get_next_phrase_for_user(
   p_user_id TEXT
 ) RETURNS TABLE (
