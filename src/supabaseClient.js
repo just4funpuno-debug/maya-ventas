@@ -22,6 +22,15 @@ const supabaseAnonKey = typeof import.meta !== 'undefined' && import.meta.env
   ? import.meta.env.VITE_SUPABASE_ANON_KEY 
   : process.env.VITE_SUPABASE_ANON_KEY;
 
+// Log para debugging (solo en producción)
+if (typeof window !== 'undefined' && (import.meta.env?.PROD || import.meta.env?.MODE === 'production')) {
+  if (supabaseUrl) {
+    console.log('🔍 [Supabase Client] URL detectada:', supabaseUrl.replace(/https?:\/\//, '').split('.')[0] + '.***');
+  } else {
+    console.error('❌ [Supabase Client] VITE_SUPABASE_URL no está definida');
+  }
+}
+
 // Crear cliente Supabase según disponibilidad
 let supabaseClient;
 
