@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AsyncButton } from "./AsyncButton.jsx";
 import { ShoppingCart, MessageCircle } from "lucide-react";
 import { todayISO } from "../App.jsx"; // si todayISO no es exportado, mover helper a util común y ajustar import
-import { uploadProductImage } from "../cloudinary";
 import { uploadComprobanteToSupabase } from "../supabaseStorage";
 import { compressImage } from "../utils/imageCompression";
 import { useToast } from "./ToastProvider.jsx";
@@ -99,18 +98,9 @@ export default function SaleForm({ products, session, onSubmit, initialSku, fixe
     let comprobanteCloudUrl = null;
     if (comprobanteFile) {
       try {
-        // Detectar entorno: localhost usa Supabase Storage, Vercel usa Cloudinary
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        
-        if (isLocalhost) {
-          // Subir a Supabase Storage en localhost
-          const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
-          comprobanteCloudUrl = result.url || result.secure_url;
-        } else {
-          // Subir a Cloudinary en Vercel
-          const result = await uploadProductImage(comprobanteFile, { folder: 'comprobantes' });
-          comprobanteCloudUrl = result.secure_url;
-        }
+        // Usar Supabase Storage en todos los entornos
+        const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
+        comprobanteCloudUrl = result.url || result.secure_url;
         setComprobanteUrl(comprobanteCloudUrl);
       } catch (err) {
         toast.push({ type: 'error', title: 'Error', message: 'Error al subir comprobante: ' + err.message });
@@ -354,9 +344,7 @@ export default function SaleForm({ products, session, onSubmit, initialSku, fixe
                   }} className="text-xs" />
                   <div className="text-[10px] text-neutral-500">
                     Sube comprobante (máx 2MB). 
-                    {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-                      ? ' Se sube a Supabase Storage.' 
-                      : ' Se sube a Cloudinary.'}
+                    Se sube a Supabase Storage.}
                   </div>
                   {comprobanteFile && <div className="text-[10px] text-green-400">Comprobante listo para subir</div>}
                   {comprobanteUrl && <div className="text-[10px] text-blue-400">Subido: <a href={comprobanteUrl} target="_blank" rel="noopener noreferrer">ver archivo</a></div>}

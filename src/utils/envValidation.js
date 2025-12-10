@@ -13,18 +13,17 @@ import { error } from './logger';
 
 /**
  * Variables de entorno requeridas
- * Nota: En producción (Vercel) puede usar Firebase en lugar de Supabase
+ * Supabase es requerido en todos los entornos (desarrollo y producción)
  */
 const REQUIRED_ENV_VARS = {
-  // Supabase solo requerido en desarrollo
-  // En producción, se puede usar Firebase
+  // Supabase requerido siempre
 };
 
 /**
  * Variables de entorno opcionales (con valores por defecto)
  */
 const OPTIONAL_ENV_VARS = {
-  VITE_CLOUDINARY_SIGNATURE_URL: '/api/cloudinary-signature'
+  // No hay variables opcionales por ahora
 };
 
 /**
@@ -49,30 +48,17 @@ export function validateEnv() {
   const missing = [];
   const errors = [];
   
-  // En desarrollo, validar Supabase
-  // En producción, permitir Firebase o Supabase
-  if (isDev()) {
-    // En desarrollo, Supabase es requerido
-    const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-    const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
-    
-    if (!supabaseUrl || !supabaseKey) {
-      missing.push('VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY');
-      errors.push(`❌ VITE_SUPABASE_URL no está configurada. URL de Supabase (ej: https://xxx.supabase.co)`);
-      errors.push(`❌ VITE_SUPABASE_ANON_KEY no está configurada. Clave anónima de Supabase`);
-    }
-  }
+  // Supabase es requerido en TODOS los entornos (desarrollo y producción)
+  const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+  const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
   
-  // En producción, validar que al menos uno esté configurado
-  if (isProd()) {
-    const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-    const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
-    // Firebase no requiere variables de entorno adicionales (usa config hardcodeada)
+  if (!supabaseUrl || !supabaseKey) {
+    missing.push('VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY');
+    errors.push(`❌ VITE_SUPABASE_URL no está configurada. URL de Supabase (ej: https://xxx.supabase.co)`);
+    errors.push(`❌ VITE_SUPABASE_ANON_KEY no está configurada. Clave anónima de Supabase`);
     
-    // Si no hay Supabase, Firebase debería estar disponible
-    if (!supabaseUrl || !supabaseKey) {
-      // No es error, simplemente se usará Firebase
-      console.log('ℹ️  Producción: Usando Firebase Auth (Supabase no configurado)');
+    if (isProd()) {
+      errors.push(`⚠️  En producción (Vercel), asegúrate de configurar estas variables en el dashboard de Vercel`);
     }
   }
   
@@ -141,7 +127,7 @@ export function validateEnv() {
   }
   
   // Validar formato de variables (opcional, pero útil)
-  const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+  // Reutilizar la variable ya declarada arriba
   if (supabaseUrl && !supabaseUrl.startsWith('http')) {
     errors.push(`⚠️  VITE_SUPABASE_URL parece tener un formato incorrecto: ${supabaseUrl}`);
   }

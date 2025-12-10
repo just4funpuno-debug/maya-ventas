@@ -4,8 +4,7 @@ import { registrarVentaPendiente, discountCityStock, restoreCityStock, adjustCit
 import AlmacenCityStock from "./components/AlmacenCityStock";
 import ConfirmModal from "./components/ConfirmModal";
 import ErrorModal from "./components/ErrorModal";
-import { uploadProductImage } from "./cloudinary";
-import { uploadImageToSupabase, uploadComprobanteToSupabase } from "./supabaseStorage";
+import { uploadProductImage, uploadImageToSupabase, uploadComprobanteToSupabase } from "./supabaseStorage";
 import { compressImage } from "./utils/imageCompression";
 import { validateStockForSale } from "./utils/stockValidation";
 import { normalizeCity, denormalizeCity } from "./utils/cityUtils";
@@ -1563,10 +1562,7 @@ function App() {
                   </div>
                 )}
                 {!receiptTemp && !editingReceipt.comprobante && <div className="text-[10px] text-neutral-500">No hay comprobante cargado.</div>}
-                <div className="text-[10px] text-neutral-500">Tamaño máximo 2MB. {(() => {
-                  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                  return isLocalhost ? 'Se subirá a Supabase Storage.' : 'Se subirá a Cloudinary.';
-                })()}</div>
+                <div className="text-[10px] text-neutral-500">Tamaño máximo 2MB. Se subirá a Supabase Storage.</div>
               </div>
               <div className="flex justify-end gap-2">
                 <button onClick={()=>{ setEditingReceipt(null); setReceiptTemp(null); setReceiptFile(null); }} disabled={uploadingReceipt} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs disabled:opacity-40">Cerrar</button>
@@ -1606,19 +1602,9 @@ function App() {
                       fileToUpload = await compressImage(currentReceiptFile, 60, 500);
                     }
                     
-                    // Detectar entorno: localhost usa Supabase Storage, Vercel usa Cloudinary
-                    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                    let comprobanteUrl;
-                    
-                    if (isLocalhost) {
-                      // Subir a Supabase Storage en localhost
-                      const result = await uploadComprobanteToSupabase(fileToUpload, 'comprobantes');
-                      comprobanteUrl = result.url || result.secure_url;
-                    } else {
-                      // Subir a Cloudinary en Vercel
-                      const result = await uploadProductImage(fileToUpload, { folder: 'comprobantes' });
-                      comprobanteUrl = result.secure_url;
-                    }
+                    // Usar Supabase Storage en todos los entornos
+                    const result = await uploadComprobanteToSupabase(fileToUpload, 'comprobantes');
+                    const comprobanteUrl = result.url || result.secure_url;
                     
                     // Actualizar en la tabla ventas de Supabase
                     const { data: updateData, error: updateError } = await supabase
@@ -3408,10 +3394,7 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
                   </div>
                 )}
                 {!receiptTemp && !editingReceipt.comprobante && <div className="text-[10px] text-neutral-500">No hay comprobante cargado.</div>}
-                <div className="text-[10px] text-neutral-500">Tamaño máximo 2MB. {(() => {
-                  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                  return isLocalhost ? 'Se subirá a Supabase Storage.' : 'Se subirá a Cloudinary.';
-                })()}</div>
+                <div className="text-[10px] text-neutral-500">Tamaño máximo 2MB. Se subirá a Supabase Storage.</div>
               </div>
               <div className="flex justify-end gap-2">
                 <button onClick={()=>{ setEditingReceipt(null); setReceiptTemp(null); setReceiptFile(null); }} disabled={uploadingReceipt} className="px-3 py-2 rounded-xl bg-neutral-700 text-xs disabled:opacity-40">Cerrar</button>
@@ -3451,19 +3434,9 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
                       fileToUpload = await compressImage(currentReceiptFile, 60, 500);
                     }
                     
-                    // Detectar entorno: localhost usa Supabase Storage, Vercel usa Cloudinary
-                    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                    let comprobanteUrl;
-                    
-                    if (isLocalhost) {
-                      // Subir a Supabase Storage en localhost
-                      const result = await uploadComprobanteToSupabase(fileToUpload, 'comprobantes');
-                      comprobanteUrl = result.url || result.secure_url;
-                    } else {
-                      // Subir a Cloudinary en Vercel
-                      const result = await uploadProductImage(fileToUpload, { folder: 'comprobantes' });
-                      comprobanteUrl = result.secure_url;
-                    }
+                    // Usar Supabase Storage en todos los entornos
+                    const result = await uploadComprobanteToSupabase(fileToUpload, 'comprobantes');
+                    const comprobanteUrl = result.url || result.secure_url;
                     
                     // Actualizar en la tabla ventas de Supabase
                     const { data: updateData, error: updateError } = await supabase
@@ -4240,23 +4213,15 @@ function ProductsView({ products, setProducts, session }) {
     };
     if (sintetico) data.sintetico = true;
     // Subir imagen si es base64 (no URL) y hay imagen
-    // En localhost: usar Supabase Storage
-    // En Vercel: usar Cloudinary
+    // Usar Supabase Storage en todos los entornos
     let urlImagen = null;
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     
     if (typeof imagen === 'string' && imagen.startsWith('data:')) {
-      setMensaje(isLocalhost ? 'Subiendo imagen a Supabase Storage...' : 'Subiendo imagen a Cloudinary...');
+      setMensaje('Subiendo imagen a Supabase Storage...');
       try {
-        if (isLocalhost) {
-          // Usar Supabase Storage en localhost
-          const result = await uploadImageToSupabase(imagen, 'productos');
-          urlImagen = result.url;
-        } else {
-          // Usar Cloudinary en Vercel
-          const result = await uploadProductImage(imagen, { folder: 'maya-productos' });
-          urlImagen = result.secure_url;
-        }
+        // Usar Supabase Storage
+        const result = await uploadImageToSupabase(imagen, 'productos');
+        urlImagen = result.url;
       } catch (err) {
         setMensaje(`Error subiendo imagen: ${err && err.message ? err.message : String(err)}`);
         return;
@@ -7490,7 +7455,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   const [cantidadExtra, setCantidadExtra] = useState(0);
   // Métodos disponibles restringidos a Delivery y Encomienda. Iniciar en Delivery.
   const [metodo, setMetodo] = useState("Delivery");
-  const [comprobanteFile, setComprobanteFile] = useState(null); // File para Cloudinary
+  const [comprobanteFile, setComprobanteFile] = useState(null); // File para Supabase Storage
   const [comprobanteUrl, setComprobanteUrl] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
   const [celular, setCelular] = useState("");
@@ -7536,21 +7501,10 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
     try {
       setSubiendo(true);
       
-      // Detectar entorno: localhost usa Supabase Storage, Vercel usa Cloudinary
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      
-      if (isLocalhost) {
-        // Subir a Supabase Storage en localhost
-        const { uploadComprobanteToSupabase } = await import('./supabaseStorage.js');
-        const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
-        comprobanteFinal = result.url || result.secure_url;
-      } else {
-        // Subir a Cloudinary en Vercel
-        const mod = await import('./cloudinary.js');
-        if(typeof mod.uploadProductImage !== 'function') throw new Error('uploadProductImage no encontrada');
-        const res = await mod.uploadProductImage(comprobanteFile, { folder:'comprobantes' });
-        comprobanteFinal = res.secure_url;
-      }
+      // Usar Supabase Storage en todos los entornos
+      const { uploadComprobanteToSupabase } = await import('./supabaseStorage.js');
+      const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
+      comprobanteFinal = result.url || result.secure_url;
       
       setComprobanteUrl(comprobanteFinal);
     } catch(err){
