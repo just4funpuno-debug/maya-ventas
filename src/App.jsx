@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useToast } from './components/ToastProvider.jsx';
 import { registrarVentaPendiente, discountCityStock, restoreCityStock, adjustCityStock, subscribeCityStock } from "./supabaseUtils";
 import AlmacenCityStock from "./components/AlmacenCityStock";
 import ConfirmModal from "./components/ConfirmModal";
 import ErrorModal from "./components/ErrorModal";
-import { uploadProductImage, uploadImageToSupabase, uploadComprobanteToSupabase } from "./supabaseStorage";
+import { uploadProductImage } from "./cloudinary";
+import { uploadImageToSupabase, uploadComprobanteToSupabase } from "./supabaseStorage";
 import { compressImage } from "./utils/imageCompression";
 import { validateStockForSale } from "./utils/stockValidation";
 import { normalizeCity, denormalizeCity } from "./utils/cityUtils";
@@ -170,7 +171,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Toolti
 import {
   LogIn, LogOut, ShoppingCart, CircleDollarSign, TrendingUp, AlertTriangle, Upload, Plus,
   Package, FileSpreadsheet, Wallet, Settings, X, UserPlus, MapPin, Search, Plane, Clock, Check, History,
-  ArrowLeft, ArrowRight, MessageSquare, Menu, ChevronDown, BookOpen, Edit, Trash2
+  ArrowLeft, ArrowRight, MessageSquare, Menu, ChevronDown
 } from "lucide-react";
 import Papa from "papaparse";
 
@@ -335,7 +336,7 @@ const seedSales = [
 ];
 
 // LocalStorage helpers
-const LS_KEYS = { products: "ventas.products", users: "ventas.users", sales: "ventas.sales", session: "ventas.session", warehouseDispatches: 'ventas.wdispatch', teamMessages:'ventas.team.msgs', frases: 'ventas.frases' };
+const LS_KEYS = { products: "ventas.products", users: "ventas.users", sales: "ventas.sales", session: "ventas.session", warehouseDispatches: 'ventas.wdispatch', teamMessages:'ventas.team.msgs' };
 // Agregamos almacenamiento para Mis Números
 LS_KEYS.numeros = 'ventas.numeros';
 function loadLS(k, f) { try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) : f; } catch { return f; } }
@@ -408,19 +409,8 @@ function normalizeUserLocal(u) {
   };
 }
 
-// Helper: Obtener lista de ciudades (excluye PRUEBA para usuarios no admin)
-function getCiudadesFiltradas(session){
-  const todasLasCiudades = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ","PRUEBA"];
-  if(session?.rol === 'admin'){
-    return todasLasCiudades;
-  }
-  return todasLasCiudades.filter(c => c !== 'PRUEBA');
-}
-
 function App() {
-  console.log('[App] 🟢 App component MONTANDO/RE-RENDERIZANDO');
   const [products, setProducts] = useState([]);
-  const [productsLoaded, setProductsLoaded] = useState(false); // Flag para indicar que los productos se han cargado al menos una vez
     try { log('[APP] Montando App.jsx. location.hash=', window.location.hash); } catch {}
   const [users, setUsers] = useState(() => loadLS(LS_KEYS.users, seedUsers)
     .map(u=> (u.id==='v1' && u.nombre==='Ana') ? { ...u, nombre:'Beatriz', apellidos:'vargas' } : u)
@@ -553,86 +543,7 @@ function App() {
     } catch(err){ warn('No se pudo suscribir a ventasporcobrar para KPI Por Cobrar', err); }
   }, []);
   const [session, setSession] = useState(() => loadLS(LS_KEYS.session, null));
-  // Estado para trackear si Supabase tiene sesión activa (importante para móviles)
-  const [supabaseReady, setSupabaseReady] = useState(false);
   const [dispatches, setDispatches] = useState(() => loadLS(LS_KEYS.warehouseDispatches, []).map(d=> ({ ...d, status: d.status || 'confirmado' })));
-  
-  // Verificar/restaurar sesión de Supabase cuando hay session en localStorage
-  // Nota: En móviles, puede ser necesario hacer logout/login una vez para sincronizar las sesiones
-  useEffect(() => {
-    if (!session) {
-      setSupabaseReady(false);
-      return;
-    }
-    
-    let mounted = true;
-    let authUnsub = null;
-    
-    const checkSession = async () => {
-      try {
-        const { supabase } = await import('./supabaseClient');
-        if (!supabase || supabase._isDummy) {
-          setSupabaseReady(false);
-          return;
-        }
-        
-        // Verificar si Supabase tiene sesión activa
-        const { data: authSession } = await supabase.auth.getSession();
-        
-        if (authSession?.session) {
-          setSupabaseReady(true);
-          return;
-        }
-        
-        // Escuchar cambios en el estado de autenticación
-        authUnsub = supabase.auth.onAuthStateChange((event, session) => {
-          if (!mounted) return;
-          
-          if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-            setSupabaseReady(true);
-            if (authUnsub) {
-              authUnsub.data.subscription.unsubscribe();
-              authUnsub = null;
-            }
-          } else if (event === 'SIGNED_OUT') {
-            setSupabaseReady(false);
-          }
-        });
-        
-        // Verificación después de 1 segundo como fallback
-        setTimeout(async () => {
-          if (mounted && !supabaseReady) {
-            const { data: checkSession } = await supabase.auth.getSession();
-            if (checkSession?.session) {
-              setSupabaseReady(true);
-            }
-            if (authUnsub) {
-              authUnsub.data.subscription.unsubscribe();
-              authUnsub = null;
-            }
-          }
-        }, 1000);
-        
-      } catch (error) {
-        console.error('[App] Error verificando sesión de Supabase:', error);
-        setSupabaseReady(false);
-      }
-    };
-    
-    checkSession();
-    
-    return () => {
-      mounted = false;
-      if (authUnsub) {
-        try {
-          authUnsub.data.subscription.unsubscribe();
-        } catch (e) {
-          // Ignorar errores al limpiar
-        }
-      }
-    };
-  }, [session]);
-  
   // Estado para "Mis Números"
   const [numbers, setNumbers] = useState(()=> loadLS(LS_KEYS.numeros, [])); // [{id, sku, telefonia, nombreOtro, celular, caduca, createdAt}]
   // Suscripción en tiempo real a la tabla 'mis_numeros' (mapeada desde 'numbers' en supabaseUsers.js)
@@ -700,7 +611,6 @@ function App() {
   }
   const [greeting, setGreeting] = useState(null); // { saludo, nombre, frase }
   const [greetingCloseReady, setGreetingCloseReady] = useState(false);
-  const greetingCheckedRef = useRef({ userId: null, fecha: null, checking: false }); // Evitar verificaciones múltiples
   // Comprobantes globales
   const [viewingReceipt, setViewingReceipt] = useState(null); // { id, data }
   const [editingReceipt, setEditingReceipt] = useState(null); // venta en edición
@@ -1077,114 +987,30 @@ function App() {
     return () => unsub();
   }, [view, products]);
 
-  // Mostrar saludo motivacional a vendedoras y admin una vez al día
+  // Mostrar saludo motivacional a vendedoras (no admin) una vez al día
   useEffect(()=>{
-    if(!session) return;
-    // Solo mostrar a vendedores y admin
-    if(session.rol !== 'seller' && session.rol !== 'admin') return;
-    
-    const hoy = todayISO();
-    const ref = greetingCheckedRef.current;
-    
-    // Si ya se verificó para este usuario y fecha, no volver a verificar
-    if (ref.userId === session.id && ref.fecha === hoy && ref.checking) {
-      return;
-    }
-    
-    // Resetear si cambió el usuario o la fecha
-    if (ref.userId !== session.id || ref.fecha !== hoy) {
-      ref.checking = false;
-    }
-    
-    // Si ya se está verificando para este usuario/fecha, no hacer nada
-    if (ref.checking) return;
-    
-    // Marcar que se está verificando
-    ref.userId = session.id;
-    ref.fecha = hoy;
-    ref.checking = true;
-    
-    (async () => {
-      try {
-        const { 
-          hasUserSeenGreetingToday, 
-          getNextPhraseForUser, 
-          logUserGreeting 
-        } = await import('./services/motivationalPhrases');
-        
-        // hoy ya está definido arriba
-        const hoyDate = new Date(hoy);
-        
-        // Verificar si ya se mostró hoy (en Supabase)
-        const { data: yaVisto, error: checkError } = await hasUserSeenGreetingToday(session.id, hoyDate);
-        
-        if (checkError) {
-          console.error('[Greeting] Error verificando si ya se vio:', checkError);
-          // Resetear el flag para permitir reintentos
-          greetingCheckedRef.current.checking = false;
-          return;
-        }
-        
-        if (yaVisto === true) {
-          console.log('[Greeting] Ya mostrado hoy, no se muestra nuevamente');
-          // Mantener checking = true para evitar verificar de nuevo hoy
-          return;
-        }
-        
-        console.log('[Greeting] No se ha mostrado hoy, obteniendo frase...');
-        
-        // Obtener próxima frase del pool (desde Supabase)
-        const { data: fraseData, error: phraseError } = await getNextPhraseForUser(session.id);
-        
-        if (phraseError || !fraseData) {
-          console.error('[Greeting] Error obteniendo frase:', phraseError);
-          console.log('[Greeting] NO se mostrará el modal porque no hay frase disponible');
-          // Resetear el flag para permitir reintentos cuando haya frases disponibles
-          greetingCheckedRef.current.checking = false;
-          return;
-        }
-        
-        console.log('[Greeting] Frase obtenida correctamente:', fraseData);
-        
-        // Saludo según hora Bolivia
-        const h = horaBolivia();
-        const saludo = h < 12 ? 'Buenos días' : (h < 18 ? 'Buenas tardes' : 'Buenas noches');
-        const nombre = (session.nombre||'').split(' ')[0];
-        
-        console.log('[Greeting] Mostrando saludo:', { 
-          saludo, 
-          nombre, 
-          frase: fraseData.phrase_text,
-          phraseId: fraseData.phrase_id
-        });
-        
-        // Registrar en Supabase que se mostró el saludo
-        const { error: logError } = await logUserGreeting(
-          session.id,
-          hoyDate,
-          fraseData.phrase_id,
-          fraseData.phrase_text,
-          saludo
-        );
-        
-        if (logError) {
-          console.error('[Greeting] Error registrando saludo:', logError);
-          console.log('[Greeting] NO se mostrará el modal porque falló el registro');
-          // Resetear el flag para permitir reintentos
-          greetingCheckedRef.current.checking = false;
-          return;
-        }
-        
-        console.log('[Greeting] Registro exitoso, mostrando modal...');
-        // Mostrar el saludo SOLO si el registro fue exitoso
-        setGreeting({ saludo, nombre: nombre.toUpperCase(), frase: fraseData.phrase_text });
-        // Mantener checking = true para evitar verificar de nuevo hoy
-      } catch(err) {
-        console.error('[Greeting] Error al mostrar saludo:', err);
-        // Resetear el flag en caso de error para permitir reintentos
-        greetingCheckedRef.current.checking = false;
+    if(!session || session.rol !== 'seller') return;
+    try {
+      const key = `ventas.greeting.${session.id}`;
+      const data = JSON.parse(localStorage.getItem(key)||'null');
+      const hoy = todayISO();
+      if(data && data.date === hoy) return; // ya mostrado hoy
+      // Obtener pool restante de frases sin repetir hasta completar ciclo
+      const poolKey = `ventas.greeting.pool.${session.id}`;
+      let pool = JSON.parse(localStorage.getItem(poolKey)||'null');
+      if(!Array.isArray(pool) || pool.length===0){
+        // reiniciar pool barajado
+        pool = [...FRASES_MOTIVACION].sort(()=>Math.random()-0.5);
       }
-    })();
+      const frase = pool.shift();
+      localStorage.setItem(poolKey, JSON.stringify(pool));
+      localStorage.setItem(key, JSON.stringify({ date: hoy, frase }));
+      // Saludo según hora Bolivia
+      const h = horaBolivia();
+      const saludo = h < 12 ? 'Buenos días' : (h < 18 ? 'Buenas tardes' : 'Buenas noches');
+      const nombre = (session.nombre||'').split(' ')[0];
+      setGreeting({ saludo, nombre: nombre.toUpperCase(), frase });
+    } catch {/* ignore */}
   }, [session]);
 
   // Habilitar botón de cierre tras 5s (no autocierra)
@@ -1212,43 +1038,11 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sincroniza productos en tiempo real desde almacenCentral
-  // Esperar a que haya sesión y Supabase esté listo antes de suscribirse
+  // Sincroniza productos en tiempo real desde Firestore (colección almacenCentral)
   useEffect(() => {
-    if (!session) {
-      setProducts([]);
-      setProductsLoaded(false);
-      return;
-    }
-    
-    // Esperar a que Supabase esté listo
-    if (!supabaseReady) {
-      return;
-    }
-    
-    let mounted = true;
-    let unsubFn = null;
-    
-    const unsub = subscribeCollection('almacenCentral', (newProducts) => {
-      if (!mounted) return;
-      
-      setProducts(newProducts);
-      if (newProducts.length > 0) {
-        setProductsLoaded(true);
-      } else {
-        setProductsLoaded(true); // Marcar como cargado aunque esté vacío
-      }
-    });
-    
-    unsubFn = unsub;
-    
-    return () => {
-      mounted = false;
-      if (unsubFn && typeof unsubFn === 'function') {
-        unsubFn();
-      }
-    };
-  }, [session, supabaseReady]);
+    const unsub = subscribeCollection('almacenCentral', setProducts);
+    return () => unsub();
+  }, []);
 
   // Suscripción en tiempo real a cityStock (ejemplo: puedes guardar en un estado aparte)
   const [cityStock, setCityStock] = useState([]);
@@ -1385,7 +1179,7 @@ function App() {
               transition={{ duration: 0.5, ease: 'easeInOut' }}
               className="absolute inset-0 pb-safe"
             >
-              <VentasView sales={sales} setSales={setSales} products={products} session={session} dispatches={dispatches} setDispatches={setDispatches} setProducts={setProducts} setView={navigate} setDepositSnapshots={setDepositSnapshots} users={users} />
+              <VentasView sales={sales} setSales={setSales} products={products} session={session} dispatches={dispatches} setDispatches={setDispatches} setProducts={setProducts} setView={navigate} setDepositSnapshots={setDepositSnapshots} />
             </motion.div>
           )}
           {view === 'deposit' && session.rol==='admin' && (
@@ -1397,7 +1191,7 @@ function App() {
               transition={{ duration: 0.5, ease: 'easeInOut' }}
               className="absolute inset-0 pb-safe"
             >
-              <DepositConfirmView snapshots={depositSnapshots} setSnapshots={setDepositSnapshots} products={products} setSales={setSales} users={users} onBack={()=> setView('historial')} />
+              <DepositConfirmView snapshots={depositSnapshots} setSnapshots={setDepositSnapshots} products={products} setSales={setSales} onBack={()=> setView('historial')} />
             </motion.div>
           )}
           {view === 'almacen' && session.rol === 'admin' && (
@@ -1422,7 +1216,7 @@ function App() {
               className="absolute inset-0 pb-safe"
             >
               <div className="relative w-full h-full flex flex-col bg-[#121f27]">
-                <RegisterSaleView products={products} setProducts={setProducts} sales={sales} setSales={setSales} session={session} dispatches={dispatches} productsLoaded={productsLoaded} />
+                <RegisterSaleView products={products} setProducts={setProducts} sales={sales} setSales={setSales} session={session} dispatches={dispatches} />
                 {/* Anti-flash fondo blanco en extremos inferiores iOS/Android */}
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-b from-transparent to-[#121f27]"></div>
               </div>
@@ -1574,46 +1368,6 @@ function App() {
         {/* Barra inferior móvil persistente fuera de las vistas animadas para no desmontarse */}
         <MobileBottomNav view={view} setView={navigate} />
       </div>
-      {/* Modal de saludo motivacional */}
-      <AnimatePresence>
-        {greeting && (
-          <Modal 
-            onClose={() => setGreeting(null)} 
-            disableClose={!greetingCloseReady}
-            autoWidth
-          >
-            <div className="space-y-4 w-full max-w-[480px] px-1">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-[#e7922b] mb-2">
-                  {greeting.saludo}
-                </h2>
-                <p className="text-lg text-neutral-300 font-semibold mb-4">
-                  {greeting.nombre}
-                </p>
-              </div>
-              <div className="bg-[#0f171e] rounded-xl p-6 border border-[#e7922b]/30">
-                <p className="text-neutral-200 text-center text-base leading-relaxed italic">
-                  "{greeting.frase}"
-                </p>
-              </div>
-              <div className="flex justify-center pt-2">
-                <button
-                  onClick={() => setGreeting(null)}
-                  disabled={!greetingCloseReady}
-                  className={`px-6 py-2 rounded-xl font-semibold text-sm transition-all ${
-                    greetingCloseReady
-                      ? 'bg-[#e7922b] text-[#1a2430] hover:brightness-110 active:scale-95 cursor-pointer'
-                      : 'bg-neutral-700 text-neutral-500 cursor-not-allowed opacity-50'
-                  }`}
-                >
-                  {greetingCloseReady ? 'Continuar' : 'Espera un momento...'}
-                </button>
-              </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>
-
       {/* Modales globales de comprobantes */}
       <AnimatePresence>
         {/* TABLA_LUPA_DETALLE_ENTREGA: modal que aparece al hacer click en la lupa de una entrega confirmada */}
@@ -1683,15 +1437,6 @@ function App() {
                   if(!receiptFile){ toast.push({ type: 'error', title: 'Error', message: 'Selecciona un archivo' }); return; }
                   if(uploadingReceipt) return; // Guard contra doble ejecución
                   
-                  // Validar permisos antes de subir comprobante
-                  if(!puedeEditarPedido(editingReceipt)){
-                    toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-                    setEditingReceipt(null);
-                    setReceiptTemp(null);
-                    setReceiptFile(null);
-                    return;
-                  }
-                  
                   setUploadingReceipt(true);
                   
                   // Guardar estado anterior para rollback
@@ -1715,43 +1460,24 @@ function App() {
                       fileToUpload = await compressImage(currentReceiptFile, 60, 500);
                     }
                     
-                    // Usar Supabase Storage en todos los entornos
+                    // Subir a Supabase Storage
                     const result = await uploadComprobanteToSupabase(fileToUpload, 'comprobantes');
                     const comprobanteUrl = result.url || result.secure_url;
                     
-                    // Actualizar en la tabla ventas de Supabase
-                    const { data: updateData, error: updateError } = await supabase
+                    // Actualizar en la tabla ventas
+                    const { error } = await supabase
                       .from('ventas')
                       .update({ comprobante: comprobanteUrl })
-                      .eq('id', currentEditingReceipt.id)
-                      .select(); // Seleccionar para verificar que se actualizó
+                      .eq('id', currentEditingReceipt.id);
                     
-                    if (updateError) {
-                      throw new Error(`Error actualizando comprobante en Supabase: ${updateError.message}`);
+                    if (error) {
+                      throw new Error(`Error actualizando comprobante: ${error.message}`);
                     }
                     
-                    // Verificar que realmente se actualizó
-                    if (!updateData || updateData.length === 0) {
-                      throw new Error('No se pudo verificar la actualización en Supabase. La venta podría no existir.');
-                    }
+                    // Reemplazar preview temporal con la URL real de Supabase
+                    setSales(prev => prev.map(s=> s.id===currentEditingReceipt.id ? { ...s, comprobante: comprobanteUrl } : s));
                     
-                    // Confirmar que el comprobante se guardó correctamente
-                    const updatedVenta = updateData[0];
-                    if (updatedVenta.comprobante !== comprobanteUrl) {
-                      console.warn('[Dashboard] El comprobante guardado no coincide con el esperado:', {
-                        esperado: comprobanteUrl,
-                        guardado: updatedVenta.comprobante
-                      });
-                    }
-                    
-                    console.log('[Dashboard] Comprobante guardado correctamente en Supabase:', {
-                      ventaId: currentEditingReceipt.id,
-                      comprobanteUrl: comprobanteUrl
-                    });
-                    
-                    // No actualizamos setSales aquí - la suscripción en tiempo real lo hará automáticamente
-                    // cuando Supabase actualice la base de datos. Esto evita condiciones de carrera.
-                    toast.push({ type: 'success', title: 'Éxito', message: 'Comprobante subido y guardado correctamente en Supabase' });
+                    toast.push({ type: 'success', title: 'Éxito', message: 'Comprobante subido correctamente' });
                   } catch (err) {
                     // ROLLBACK: Revertir actualización optimista si falla
                     console.error('[Dashboard] Error subiendo comprobante:', err);
@@ -1803,338 +1529,19 @@ function App() {
 
 // ---------------------- Frases Motivacionales ----------------------
 function FrasesView(){
-  const toast = useToast();
-  const [frases, setFrases] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editingIndex, setEditingIndex] = useState(null);
-  const [editingText, setEditingText] = useState('');
-  const [newFrase, setNewFrase] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
-
-  // Cargar frases desde Supabase al montar el componente
-  useEffect(() => {
-    async function loadPhrases() {
-      setLoading(true);
-      try {
-        const { getAllPhrases, migratePhrasesFromLocalStorage } = await import('./services/motivationalPhrases');
-        
-        // Intentar migrar frases desde localStorage (si existen)
-        try {
-          const savedLocal = loadLS(LS_KEYS.frases, null);
-          if (savedLocal && Array.isArray(savedLocal) && savedLocal.length > 0) {
-            const { data: migrationResult } = await migratePhrasesFromLocalStorage(savedLocal);
-            if (migrationResult && migrationResult.inserted > 0) {
-              console.log(`[FrasesView] Migradas ${migrationResult.inserted} frases desde localStorage`);
-              // Opcional: limpiar localStorage después de migrar
-              // localStorage.removeItem(LS_KEYS.frases);
-            }
-          }
-        } catch (migrationErr) {
-          console.warn('[FrasesView] Error en migración:', migrationErr);
-        }
-        
-        // Cargar frases desde Supabase
-        const { data, error } = await getAllPhrases();
-        if (error) {
-          console.error('[FrasesView] Error cargando frases:', error);
-          toast.push({ type: 'error', title: 'Error', message: 'Error al cargar frases desde Supabase' });
-          // Fallback a frases por defecto si hay error
-          setFrases(FRASES_MOTIVACION);
-        } else {
-          if (data && data.length > 0) {
-            setFrases(data.map(p => p.phrase_text));
-          } else {
-            // Si no hay frases en Supabase, usar las por defecto
-            setFrases(FRASES_MOTIVACION);
-            // Opcional: insertar frases por defecto en Supabase
-            const { migratePhrasesFromLocalStorage } = await import('./services/motivationalPhrases');
-            await migratePhrasesFromLocalStorage(FRASES_MOTIVACION);
-          }
-        }
-      } catch (err) {
-        console.error('[FrasesView] Error fatal:', err);
-        toast.push({ type: 'error', title: 'Error', message: 'Error al cargar frases' });
-        // Fallback a frases por defecto
-        setFrases(FRASES_MOTIVACION);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadPhrases();
-  }, [toast]);
-
-  async function handleEdit(index) {
-    setEditingIndex(index);
-    // Obtener el texto actual de la frase (puede ser string o objeto)
-    const phraseText = typeof frases[index] === 'string' ? frases[index] : frases[index]?.phrase_text || '';
-    setEditingText(phraseText);
-  }
-
-  async function handleSaveEdit(index) {
-    if(!editingText.trim()) {
-      toast.push({ type: 'error', title: 'Error', message: 'La frase no puede estar vacía.' });
-      return;
-    }
-    
-    try {
-      const { getAllPhrases, updatePhrase } = await import('./services/motivationalPhrases');
-      
-      // Obtener todas las frases con sus IDs
-      const { data: allPhrases, error: fetchError } = await getAllPhrases();
-      if (fetchError || !allPhrases || allPhrases.length === 0) {
-        throw new Error('No se pudieron cargar las frases para actualizar');
-      }
-      
-      const phraseToUpdate = allPhrases[index];
-      if (!phraseToUpdate || !phraseToUpdate.id) {
-        throw new Error('Frase no encontrada');
-      }
-      
-      // Actualizar en Supabase
-      const { error } = await updatePhrase(phraseToUpdate.id, { phrase_text: editingText.trim() });
-      if (error) {
-        throw error;
-      }
-      
-      // Actualizar estado local
-      const updated = [...allPhrases];
-      updated[index] = { ...phraseToUpdate, phrase_text: editingText.trim() };
-      setFrases(updated.map(p => p.phrase_text));
-      setEditingIndex(null);
-      setEditingText('');
-      toast.push({ type: 'success', title: 'Éxito', message: 'Frase actualizada correctamente.' });
-    } catch (err) {
-      console.error('[handleSaveEdit] Error:', err);
-      toast.push({ type: 'error', title: 'Error', message: 'Error al actualizar frase: ' + (err?.message || 'Error desconocido') });
-    }
-  }
-
-  function handleCancelEdit() {
-    setEditingIndex(null);
-    setEditingText('');
-  }
-
-  async function handleDelete(index) {
-    if(!confirm('¿Estás seguro de eliminar esta frase?')) return;
-    
-    try {
-      const { getAllPhrases, deletePhrase } = await import('./services/motivationalPhrases');
-      
-      // Obtener todas las frases con sus IDs
-      const { data: allPhrases, error: fetchError } = await getAllPhrases();
-      if (fetchError || !allPhrases || allPhrases.length === 0) {
-        throw new Error('No se pudieron cargar las frases para eliminar');
-      }
-      
-      const phraseToDelete = allPhrases[index];
-      if (!phraseToDelete || !phraseToDelete.id) {
-        throw new Error('Frase no encontrada');
-      }
-      
-      // Eliminar en Supabase (soft delete)
-      const { error } = await deletePhrase(phraseToDelete.id);
-      if (error) {
-        throw error;
-      }
-      
-      // Actualizar estado local
-      const updated = allPhrases.filter((_, i) => i !== index);
-      setFrases(updated.map(p => p.phrase_text));
-      toast.push({ type: 'success', title: 'Éxito', message: 'Frase eliminada correctamente.' });
-    } catch (err) {
-      console.error('[handleDelete] Error:', err);
-      toast.push({ type: 'error', title: 'Error', message: 'Error al eliminar frase: ' + (err?.message || 'Error desconocido') });
-    }
-  }
-
-  async function handleAdd() {
-    if(!newFrase.trim()) {
-      toast.push({ type: 'error', title: 'Error', message: 'La frase no puede estar vacía.' });
-      return;
-    }
-    
-    try {
-      const { addPhrase, getAllPhrases } = await import('./services/motivationalPhrases');
-      
-      // Agregar en Supabase
-      const { data: newPhrase, error } = await addPhrase(newFrase.trim());
-      if (error) {
-        throw error;
-      }
-      
-      // Recargar todas las frases desde Supabase
-      const { data: allPhrases, error: fetchError } = await getAllPhrases();
-      if (fetchError) {
-        throw fetchError;
-      }
-      
-      // Actualizar estado local
-      if (allPhrases && allPhrases.length > 0) {
-        setFrases(allPhrases.map(p => p.phrase_text));
-      } else {
-        setFrases([...frases, newFrase.trim()]);
-      }
-      
-      setNewFrase('');
-      setShowAddForm(false);
-      toast.push({ type: 'success', title: 'Éxito', message: 'Frase agregada correctamente.' });
-    } catch (err) {
-      console.error('[handleAdd] Error:', err);
-      toast.push({ type: 'error', title: 'Error', message: 'Error al agregar frase: ' + (err?.message || 'Error desconocido') });
-    }
-  }
-
-  async function handleReset() {
-    if(!confirm('¿Estás seguro de restaurar las frases originales? Se agregarán las frases por defecto a Supabase.')) return;
-    
-    try {
-      const { migratePhrasesFromLocalStorage, getAllPhrases } = await import('./services/motivationalPhrases');
-      
-      // Migrar frases por defecto (solo agregará las que no existen)
-      const { error } = await migratePhrasesFromLocalStorage(FRASES_MOTIVACION);
-      if (error) {
-        throw error;
-      }
-      
-      // Recargar todas las frases desde Supabase
-      const { data: allPhrases, error: fetchError } = await getAllPhrases();
-      if (fetchError) {
-        throw fetchError;
-      }
-      
-      // Actualizar estado local
-      if (allPhrases && allPhrases.length > 0) {
-        setFrases(allPhrases.map(p => p.phrase_text));
-      } else {
-        setFrases(FRASES_MOTIVACION);
-      }
-      
-      toast.push({ type: 'success', title: 'Éxito', message: 'Frases por defecto agregadas a Supabase.' });
-    } catch (err) {
-      console.error('[handleReset] Error:', err);
-      toast.push({ type: 'error', title: 'Error', message: 'Error al restaurar frases: ' + (err?.message || 'Error desconocido') });
-    }
-  }
-
+  const frases = FRASES_MOTIVACION;
   return (
     <div className="flex-1 p-6 bg-[#121f27] overflow-auto">
-      <header className="mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Frases motivacionales</h2>
-          <p className="text-sm text-neutral-400">Gestiona las frases de bienvenida para vendedores</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] font-semibold text-sm hover:brightness-110 active:scale-95 flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Agregar
-          </button>
-          <button
-            onClick={handleReset}
-            className="px-4 py-2 rounded-xl bg-neutral-700 text-neutral-200 font-semibold text-sm hover:bg-neutral-600 active:scale-95"
-          >
-            Restaurar
-          </button>
-        </div>
+      <header className="mb-4">
+        <h2 className="text-xl font-semibold">Frases motivacionales</h2>
       </header>
-
-      {/* Formulario para agregar nueva frase */}
-      {showAddForm && (
-        <div className="mb-6 p-4 rounded-xl bg-[#0f171e] border border-neutral-800">
-          <h3 className="text-sm font-semibold mb-3 text-neutral-200">Agregar nueva frase</h3>
-          <div className="flex gap-2">
-            <textarea
-              value={newFrase}
-              onChange={e => setNewFrase(e.target.value)}
-              placeholder="Escribe la nueva frase motivacional..."
-              className="flex-1 bg-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 min-h-[80px]"
-              rows={3}
-            />
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={handleAdd}
-                className="px-4 py-2 rounded-xl bg-[#e7922b] text-[#1a2430] font-semibold text-sm hover:brightness-110 active:scale-95"
-              >
-                Guardar
-              </button>
-              <button
-                onClick={() => { setShowAddForm(false); setNewFrase(''); }}
-                className="px-4 py-2 rounded-xl bg-neutral-700 text-neutral-200 font-semibold text-sm hover:bg-neutral-600 active:scale-95"
-              >
-                Cancelar
-              </button>
-            </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {frases.map((fr,i)=>(
+          <div key={i} className="p-4 rounded-xl bg-[#0f171e] border border-neutral-800 text-sm leading-snug text-neutral-200 shadow">
+            “{fr}”
           </div>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="text-center py-12 text-neutral-500">
-          <p className="text-sm">Cargando frases desde Supabase...</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {frases.map((fr, i) => (
-          <div key={i} className="p-4 rounded-xl bg-[#0f171e] border border-neutral-800 text-sm leading-snug text-neutral-200 shadow relative group">
-            {editingIndex === i ? (
-              <div className="space-y-2">
-                <textarea
-                  value={editingText}
-                  onChange={e => setEditingText(e.target.value)}
-                  className="w-full bg-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 min-h-[80px]"
-                  rows={3}
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleSaveEdit(i)}
-                    className="px-3 py-1 rounded-lg bg-[#e7922b] text-[#1a2430] font-semibold text-xs hover:brightness-110 active:scale-95 flex items-center gap-1"
-                  >
-                    <Check className="w-3 h-3" />
-                    Guardar
-                  </button>
-                  <button
-                    onClick={handleCancelEdit}
-                    className="px-3 py-1 rounded-lg bg-neutral-700 text-neutral-200 font-semibold text-xs hover:bg-neutral-600 active:scale-95 flex items-center gap-1"
-                  >
-                    <X className="w-3 h-3" />
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <p>"{fr}"</p>
-                <div className="mt-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => handleEdit(i)}
-                    className="px-2 py-1 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-neutral-200 text-xs flex items-center gap-1"
-                    title="Editar frase"
-                  >
-                    <Edit className="w-3 h-3" />
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => handleDelete(i)}
-                    className="px-2 py-1 rounded-lg bg-red-600/80 hover:bg-red-600 text-white text-xs flex items-center gap-1"
-                    title="Eliminar frase"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Eliminar
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-          ))}
-        </div>
-      )}
-      {!loading && frases.length === 0 && (
-        <div className="text-center py-12 text-neutral-500">
-          <p className="text-sm">No hay frases disponibles. Agrega una nueva frase para comenzar.</p>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
@@ -2532,7 +1939,6 @@ function Sidebar({ session, onLogout, view, setView, showMobileNav, setShowMobil
                       <button onClick={() => { setView('almacen'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='almacen'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='almacen'? 'text-[#273947]' : 'text-white')} /> Despacho de Productos</button>
                       <button onClick={() => { setView('products'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full flex items-center gap-2 p-2 rounded-xl text-left transition btn-animated "+(view==='products'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='products'? 'text-[#273947]' : 'text-white')} /> Almacen Central</button>
                       <button onClick={() => { setView('create-user'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='create-user'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><UserPlus className={"w-4 h-4 "+(view==='create-user'? 'text-[#273947]' : 'text-white')} /> Usuarios</button>
-                      {session.rol === 'admin' && <button onClick={() => { setView('frases'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='frases'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><BookOpen className={"w-4 h-4 "+(view==='frases'? 'text-[#273947]' : 'text-white')} /> 📝 Frases</button>}
                       <button onClick={() => { setView('whatsapp-accounts'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='whatsapp-accounts'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><MessageSquare className={"w-4 h-4 "+(view==='whatsapp-accounts'? 'text-[#273947]' : 'text-white')} /> WhatsApp</button>
                       {session.rol === 'admin' && <button onClick={() => { setView('whatsapp-sequences'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='whatsapp-sequences'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><MessageSquare className={"w-4 h-4 "+(view==='whatsapp-sequences'? 'text-[#273947]' : 'text-white')} /> 📋 CRM</button>}
                       {session.rol === 'admin' && <button onClick={() => { setView('whatsapp-dashboard'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='whatsapp-dashboard'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><MessageSquare className={"w-4 h-4 "+(view==='whatsapp-dashboard'? 'text-[#273947]' : 'text-white')} /> 💬 Chat WhatsApp</button>}
@@ -2566,7 +1972,7 @@ function Sidebar({ session, onLogout, view, setView, showMobileNav, setShowMobil
               </AnimatePresence>
             </div>
           </nav>
-          <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm mb-20 md:mb-0">
+          <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm">
             <LogOut className="w-4 h-4" /> Cerrar Sesion
           </button>
         </>
@@ -2640,13 +2046,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
 
   function confirmarSecondConfirm(){
     if(!secondConfirm || savingSecondConfirm) return;
-    // Validar permisos antes de confirmar
-    const sale = sales.find(s => s.id === secondConfirm.id);
-    if(sale && !puedeEditarPedido(sale)){
-      toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-      setSecondConfirm(null);
-      return;
-    }
     setSavingSecondConfirm(true);
     const { id, costoDelivery } = secondConfirm;
     
@@ -2693,8 +2092,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
   // Edición / carga de comprobante (QR)
   const [editingReceipt, setEditingReceipt] = useState(null); // objeto venta
   const [receiptTemp, setReceiptTemp] = useState(null); // base64 temporal
-  const [receiptFile, setReceiptFile] = useState(null); // File original
-  const [uploadingReceipt, setUploadingReceipt] = useState(false); // loading al subir
   // Reprogramar pedido pendiente
   const [reschedulingSale, setReschedulingSale] = useState(null); // objeto venta
   const [rsFecha, setRsFecha] = useState(todayISO());
@@ -2817,33 +2214,7 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
       return Promise.resolve();
     }
   }
-
-  // Helper: Verificar si el usuario puede editar un pedido (solo pedidos de su grupo para vendedores)
-  function puedeEditarPedido(pedido){
-    // Admin puede editar todos los pedidos
-    if(session.rol === 'admin') return true;
-    // Vendedor solo puede editar pedidos de su grupo
-    const userGroup = (users.find(u=>u.id===session.id)?.grupo)||session.grupo||'';
-    if(!userGroup) return false; // Si no tiene grupo, no puede editar
-    // Buscar el vendedor del pedido
-    const vId = pedido.vendedoraId;
-    let vendedorUser = null;
-    if(vId){
-      vendedorUser = users.find(u=>u.id===vId);
-    } else {
-      vendedorUser = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (pedido.vendedora||'').trim().toLowerCase()));
-    }
-    if(!vendedorUser) return false;
-    // Solo puede editar si el vendedor está en su mismo grupo
-    return vendedorUser.grupo === userGroup;
-  }
-
   function abrirModalCosto(sale){
-    // Validar permisos antes de abrir modal
-    if(!puedeEditarPedido(sale)){
-      toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-      return;
-    }
     setConfirmingSale(sale.id);
     setDeliveryCost(sale.gasto != null ? String(sale.gasto) : '');
   }
@@ -2960,11 +2331,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
   function solicitarCancelarEntrega(id){
     const sale = sales.find(s=>s.id===id);
     if(!sale) return;
-    // Validar permisos antes de cancelar
-    if(!puedeEditarPedido(sale)){
-      toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-      return;
-    }
     setCancelingSale(id);
     setCancelDeliveryCost('');
   }
@@ -2975,13 +2341,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
     const nowTs = Date.now();
     const sale = sales.find(s=>s.id===cancelingSale);
     if (!sale) { setCancelingSale(null); setCancelDeliveryCost(''); return; }
-    // Validar permisos antes de cancelar
-    if(!puedeEditarPedido(sale)){
-      toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-      setCancelingSale(null);
-      setCancelDeliveryCost('');
-      return;
-    }
     // Si hay costo >0 pedir confirmación adicional
     if(Number(costo)>0 && !confirmCancelCost){
       setConfirmCancelCost({ id: cancelingSale, costo: Number(costo) });
@@ -3045,11 +2404,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
   }
 
   function abrirReprogramar(s){
-    // Validar permisos antes de reprogramar
-    if(!puedeEditarPedido(s)){
-      toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-      return;
-    }
     setReschedulingSale(s);
     setRsFecha(s.fecha || todayISO());
     // parse horaEntrega en formato posible "H:MM AM-H:MM PM" o solo inicio
@@ -3156,48 +2510,29 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
 
   {(() => {
   const allPendRaw = sales.filter(s=> (s.estadoEntrega||'confirmado')==='pendiente')
-          .map(s=> ({...s, horaEntrega: normalizeRangeTo12(s.horaEntrega||'')}))
-          // Excluir pedidos de ciudad PRUEBA para usuarios no admin
-          .filter(s => {
-            if(session.rol === 'admin') return true;
-            return (s.ciudad || '').toUpperCase() !== 'PRUEBA';
-          });
-        // Filtrar por grupo si es vendedora (incluye admin sin importar su grupo)
+          .map(s=> ({...s, horaEntrega: normalizeRangeTo12(s.horaEntrega||'')}));
+        // Filtrar por grupo si es vendedora
         let allPend = allPendRaw;
         if(session.rol!=='admin'){
           // Determinar grupo del usuario en sesión
           const userGroup = (users.find(u=>u.id===session.id)?.grupo)||session.grupo||'';
           if(userGroup){
-            // Si tiene grupo: ver pedidos de su grupo + TODOS los pedidos de admin (sin importar grupo del admin)
             allPend = allPendRaw.filter(p=>{
               const vId = p.vendedoraId;
-              let vendedorUser = null;
               if(vId){
-                vendedorUser = users.find(u=>u.id===vId);
-              } else {
-                // fallback comparar nombre
-                vendedorUser = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (p.vendedora||'').trim().toLowerCase()));
+                const vu = users.find(u=>u.id===vId);
+                return vu? (vu.grupo===userGroup) : false;
               }
-              if(!vendedorUser) return false;
-              // Incluir si: (1) es admin (sin importar grupo) O (2) está en el mismo grupo
-              return vendedorUser.rol === 'admin' || vendedorUser.grupo === userGroup;
-            });
-          } else {
-            // Si no tiene grupo: excluir todos los pedidos de admin
-            allPend = allPendRaw.filter(p=>{
-              const vId = p.vendedoraId;
-              let vendedorUser = null;
-              if(vId){
-                vendedorUser = users.find(u=>u.id===vId);
-              } else {
-                vendedorUser = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (p.vendedora||'').trim().toLowerCase()));
-              }
-              // Excluir pedidos donde el vendedor es admin
-              return vendedorUser ? (vendedorUser.rol !== 'admin') : false;
+              // fallback comparar nombre
+              const vu = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (p.vendedora||'').trim().toLowerCase()));
+              return vu? (vu.grupo===userGroup):false;
             });
           }
         }
         const hoy = todayISO();
+        // Pedidos pasados (solo para admin)
+        const pasadas = session.rol === 'admin' ? allPend.filter(p=>p.fecha < hoy) : [];
+        const fechasPasadas = session.rol === 'admin' ? Array.from(new Set(pasadas.map(f=>f.fecha))).sort().reverse() : [];
         const pendientesHoy = allPend.filter(p=>p.fecha===hoy)
           .sort((a,b)=>{
             const ha=(a.horaEntrega||'').split('-')[0].trim();
@@ -3209,12 +2544,12 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
   // Excluir productos sintéticos de las columnas de tablas de pendientes
   const productOrder = products.filter(p=>!p.sintetico).map(p=>p.sku);
 
-  function TablaPendientes({rows, titulo, fechaLabel}){
+  function TablaPendientes({rows, titulo, fechaLabel, isPast}){
           if(!rows.length) return null;
           return (
             <div className="rounded-2xl p-4 bg-[#0f171e] mb-6">
               <div className="flex items-center justify-between mb-3">
-    <h3 className="text-sm font-semibold flex items-center gap-2"><Clock className="w-4 h-4 text-[#f09929]" /> {titulo}</h3>
+    <h3 className={`text-sm font-semibold flex items-center gap-2 ${isPast ? 'text-red-400' : ''}`}><Clock className={`w-4 h-4 ${isPast ? 'text-red-400' : 'text-[#f09929]'}`} /> {titulo}</h3>
     {fechaLabel ? <div className="text-[11px] text-neutral-500">{fechaLabel}</div> : <div />}
               </div>
               <div className="overflow-x-auto -mx-3 md:mx-0 pb-2 scrollbar-thin scrollable-shadow" ref={el=>{
@@ -3299,50 +2634,19 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
                             {(() => { const sem = semaforoEntrega(s.horaEntrega, s.fecha); const glow = sem.color==='#dc2626' ? '0 0 4px #dc2626' : `0 0 4px ${sem.color}`; const blinkClass = sem.color==='#dc2626' ? 'blink-red' : (sem.blinkYellow? 'blink-yellow':''); return (<div className="flex items-center justify-center"><span className={"w-3 h-3 rounded-full shadow-inner "+blinkClass} style={{background:sem.color, boxShadow:glow}} title={sem.label}></span></div>); })()}</td>
                           <td className="p-2 text-center">
                             {['Delivery','Encomienda'].includes(s.metodo||'') && (
-                              <button 
-                                onClick={()=>{ 
-                                  if(!puedeEditarPedido(s)){
-                                    toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-                                    return;
-                                  }
-                                  setEditingReceipt(s); 
-                                  setReceiptTemp(s.comprobante||null); 
-                                }} 
-                                title={s.comprobante? 'Ver / cambiar comprobante' : 'Subir comprobante'} 
-                                disabled={!puedeEditarPedido(s)}
-                                className={"p-1 rounded-lg border text-neutral-200 "+(s.comprobante? 'bg-[#1d2a34] border-[#e7922b]':'bg-neutral-700/60 hover:bg-neutral-600 border-neutral-600')+(puedeEditarPedido(s)? '' : ' opacity-50 cursor-not-allowed')}
-                              > 
-                                {s.comprobante ? <Search className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
+                              <button onClick={()=>{ setEditingReceipt(s); setReceiptTemp(s.comprobante||null); }} title={s.comprobante? 'Ver / cambiar comprobante' : 'Subir comprobante'} className={"p-1 rounded-lg border text-neutral-200 "+(s.comprobante? 'bg-[#1d2a34] border-[#e7922b]':'bg-neutral-700/60 hover:bg-neutral-600 border-neutral-600')}> 
+                                <Upload className="w-4 h-4" />
                               </button>
                             )}
                           </td>
                           <td className="p-2">
                             <div className="flex gap-1">
-                              <button 
-                                onClick={()=>{ abrirModalCosto(s); }} 
-                                title="Confirmar" 
-                                disabled={!puedeEditarPedido(s)}
-                                className={"p-1 rounded-lg bg-[#1d2a34] hover:bg-[#274152] border border-[#e7922b]/40 text-[#e7922b]"+(puedeEditarPedido(s)? '' : ' opacity-50 cursor-not-allowed')}
-                              >
-                                <Check className="w-3 h-3" />
-                              </button>
-                              <button 
-                                onClick={()=>solicitarCancelarEntrega(s.id)} 
-                                title="Cancelar" 
-                                disabled={!puedeEditarPedido(s)}
-                                className={"p-1 rounded-lg bg-neutral-700/60 hover:bg-neutral-700 text-neutral-200 border border-neutral-600"+(puedeEditarPedido(s)? '' : ' opacity-50 cursor-not-allowed')}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
+                              <button onClick={()=>{ abrirModalCosto(s); }} title="Confirmar" className="p-1 rounded-lg bg-[#1d2a34] hover:bg-[#274152] border border-[#e7922b]/40 text-[#e7922b]"><Check className="w-3 h-3" /></button>
+                              <button onClick={()=>solicitarCancelarEntrega(s.id)} title="Cancelar" className="p-1 rounded-lg bg-neutral-700/60 hover:bg-neutral-700 text-neutral-200 border border-neutral-600"><X className="w-3 h-3" /></button>
                             </div>
                           </td>
                           <td className="p-2 text-center">
-                            <button 
-                              onClick={()=>abrirReprogramar(s)} 
-                              title="Reprogramar" 
-                              disabled={!puedeEditarPedido(s)}
-                              className={"p-1 inline-flex items-center gap-1 rounded-lg bg-neutral-700/60 hover:bg-neutral-600 text-neutral-200 border border-neutral-600 text-[10px]"+(puedeEditarPedido(s)? '' : ' opacity-50 cursor-not-allowed')}
-                            >
+                            <button onClick={()=>abrirReprogramar(s)} title="Reprogramar" className="p-1 inline-flex items-center gap-1 rounded-lg bg-neutral-700/60 hover:bg-neutral-600 text-neutral-200 border border-neutral-600 text-[10px]">
                               <Clock className="w-4 h-4" />
                               <span className="hidden md:inline">Rep</span>
                             </button>
@@ -3359,6 +2663,16 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
 
         return (
           <>
+            {/* Pedidos pasados - Solo para admin */}
+            {session.rol === 'admin' && fechasPasadas.map(f=>{
+              const rows = pasadas.filter(r=>r.fecha===f).sort((a,b)=>{
+                const ha=(a.horaEntrega||'').split('-')[0].trim();
+                const hb=(b.horaEntrega||'').split('-')[0].trim();
+                return minutesFrom12(ha)-minutesFrom12(hb);
+              });
+              const titulo = `Entregas pendientes PASADAS - ${toDMY(f)}`;
+              return <TablaPendientes key={f} rows={rows} titulo={titulo} fechaLabel={f} isPast={true} />;
+            })}
             <TablaPendientes rows={pendientesHoy} titulo="Entregas pendientes HOY" fechaLabel={hoy} />
             {fechasFuturas.map(f=>{
               const rows = futuras.filter(r=>r.fecha===f).sort((a,b)=>{
@@ -3515,15 +2829,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
                   if(!receiptFile){ toast.push({ type: 'error', title: 'Error', message: 'Selecciona un archivo' }); return; }
                   if(uploadingReceipt) return; // Guard contra doble ejecución
                   
-                  // Validar permisos antes de subir comprobante
-                  if(!puedeEditarPedido(editingReceipt)){
-                    toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-                    setEditingReceipt(null);
-                    setReceiptTemp(null);
-                    setReceiptFile(null);
-                    return;
-                  }
-                  
                   setUploadingReceipt(true);
                   
                   // Guardar estado anterior para rollback
@@ -3547,43 +2852,24 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
                       fileToUpload = await compressImage(currentReceiptFile, 60, 500);
                     }
                     
-                    // Usar Supabase Storage en todos los entornos
+                    // Subir a Supabase Storage
                     const result = await uploadComprobanteToSupabase(fileToUpload, 'comprobantes');
                     const comprobanteUrl = result.url || result.secure_url;
                     
-                    // Actualizar en la tabla ventas de Supabase
-                    const { data: updateData, error: updateError } = await supabase
+                    // Actualizar en la tabla ventas
+                    const { error } = await supabase
                       .from('ventas')
                       .update({ comprobante: comprobanteUrl })
-                      .eq('id', currentEditingReceipt.id)
-                      .select(); // Seleccionar para verificar que se actualizó
+                      .eq('id', currentEditingReceipt.id);
                     
-                    if (updateError) {
-                      throw new Error(`Error actualizando comprobante en Supabase: ${updateError.message}`);
+                    if (error) {
+                      throw new Error(`Error actualizando comprobante: ${error.message}`);
                     }
                     
-                    // Verificar que realmente se actualizó
-                    if (!updateData || updateData.length === 0) {
-                      throw new Error('No se pudo verificar la actualización en Supabase. La venta podría no existir.');
-                    }
+                    // Reemplazar preview temporal con la URL real de Supabase
+                    setSales(prev => prev.map(s=> s.id===currentEditingReceipt.id ? { ...s, comprobante: comprobanteUrl } : s));
                     
-                    // Confirmar que el comprobante se guardó correctamente
-                    const updatedVenta = updateData[0];
-                    if (updatedVenta.comprobante !== comprobanteUrl) {
-                      console.warn('[Dashboard] El comprobante guardado no coincide con el esperado:', {
-                        esperado: comprobanteUrl,
-                        guardado: updatedVenta.comprobante
-                      });
-                    }
-                    
-                    console.log('[Dashboard] Comprobante guardado correctamente en Supabase:', {
-                      ventaId: currentEditingReceipt.id,
-                      comprobanteUrl: comprobanteUrl
-                    });
-                    
-                    // No actualizamos setSales aquí - la suscripción en tiempo real lo hará automáticamente
-                    // cuando Supabase actualice la base de datos. Esto evita condiciones de carrera.
-                    toast.push({ type: 'success', title: 'Éxito', message: 'Comprobante subido y guardado correctamente en Supabase' });
+                    toast.push({ type: 'success', title: 'Éxito', message: 'Comprobante subido correctamente' });
                   } catch (err) {
                     // ROLLBACK: Revertir actualización optimista si falla
                     console.error('[Dashboard] Error subiendo comprobante:', err);
@@ -3607,14 +2893,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
           <Modal onClose={()=>{ setReschedulingSale(null); }}>
             <form onSubmit={async e=>{ e.preventDefault();
               if(reschedulingLoading) return; // Guard contra doble ejecución
-              
-              // Validar permisos antes de reprogramar
-              if(!puedeEditarPedido(reschedulingSale)){
-                toast.push({ type: 'error', title: 'Sin permisos', message: 'Solo puedes editar pedidos de tu grupo.' });
-                setReschedulingSale(null);
-                return;
-              }
-              
               setReschedulingLoading(true);
               
               const build12 = (h,m,ap)=>{ if(!h) return ''; return `${h}:${m} ${ap}`; };
@@ -4326,15 +3604,23 @@ function ProductsView({ products, setProducts, session }) {
     };
     if (sintetico) data.sintetico = true;
     // Subir imagen si es base64 (no URL) y hay imagen
-    // Usar Supabase Storage en todos los entornos
+    // En localhost: usar Supabase Storage
+    // En Vercel: usar Cloudinary
     let urlImagen = null;
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     
     if (typeof imagen === 'string' && imagen.startsWith('data:')) {
-      setMensaje('Subiendo imagen a Supabase Storage...');
+      setMensaje(isLocalhost ? 'Subiendo imagen a Supabase Storage...' : 'Subiendo imagen a Cloudinary...');
       try {
-        // Usar Supabase Storage
-        const result = await uploadImageToSupabase(imagen, 'productos');
-        urlImagen = result.url;
+        if (isLocalhost) {
+          // Usar Supabase Storage en localhost
+          const result = await uploadImageToSupabase(imagen, 'productos');
+          urlImagen = result.url;
+        } else {
+          // Usar Cloudinary en Vercel
+          const result = await uploadProductImage(imagen, { folder: 'maya-productos' });
+          urlImagen = result.secure_url;
+        }
       } catch (err) {
         setMensaje(`Error subiendo imagen: ${err && err.message ? err.message : String(err)}`);
         return;
@@ -5178,7 +4464,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
   function cancelDeleteDispatch() {
     setConfirmDelete(null);
   }
-  const ciudades = getCiudadesFiltradas(session);
+  const ciudades = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ","PRUEBA"];
   const [fecha, setFecha] = useState(todayISO());
   const [ciudad, setCiudad] = useState(ciudades[0]);
 
@@ -5474,27 +4760,17 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
   const [fechaDesdeConf, setFechaDesdeConf] = useState('');
   const [fechaHastaConf, setFechaHastaConf] = useState('');
   const [pageConf, setPageConf] = useState(1);
-  // Pendientes: no se filtran por ciudad ni fechas, pero excluir PRUEBA para usuarios no admin
+  // Pendientes: no se filtran por ciudad ni fechas
   const dispatchesPendientes = useMemo(() => 
-    dispatches.filter(d=> {
-      if(d.status === 'confirmado') return false;
-      // Excluir despachos de PRUEBA para usuarios no admin
-      if(session.rol !== 'admin' && (d.ciudad || '').toUpperCase() === 'PRUEBA') return false;
-      return true;
-    })
+    dispatches.filter(d=> d.status !== 'confirmado')
       .slice().sort((a,b)=> b.fecha.localeCompare(a.fecha)), // más reciente arriba
-    [dispatches, session]
+    [dispatches]
   );
-  // Confirmados base (ordenar más reciente primero), excluir PRUEBA para usuarios no admin
+  // Confirmados base (ordenar más reciente primero)
   const dispatchesConfirmadosBase = useMemo(() => 
-    dispatches.filter(d=> {
-      if(d.status !== 'confirmado') return false;
-      // Excluir despachos de PRUEBA para usuarios no admin
-      if(session.rol !== 'admin' && (d.ciudad || '').toUpperCase() === 'PRUEBA') return false;
-      return true;
-    })
+    dispatches.filter(d=> d.status === 'confirmado')
       .slice().sort((a,b)=> b.fecha.localeCompare(a.fecha)),
-    [dispatches, session]
+    [dispatches]
   );
   const dispatchesConfirmadosFiltrados = useMemo(() => 
     dispatchesConfirmadosBase.filter(d=> (
@@ -6690,155 +5966,69 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt, onGo
   const [dateEnd, setDateEnd] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 50;
-  // Confirmadas verdaderas (para gráfico) - excluir PRUEBA para usuarios no admin
-  const confirmedBase = (session?.rol === 'admin' ? sales : sales.filter(s => (s.ciudad || '').toUpperCase() !== 'PRUEBA'))
-    .filter(s=> s.estadoEntrega === 'entregada' || s.estadoEntrega === 'confirmado');
-  
-  // Helper para convertir fecha+hora a timestamp comparable para ordenamiento
-  const getDateTimeTimestamp = useCallback((venta) => {
-    const fecha = venta.fecha || '';
-    if (!fecha) return 0;
-    
-    // Normalizar fecha a formato ISO (YYYY-MM-DD)
-    let fechaISO = fecha;
-    if (fecha.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-      // Formato DD/MM/YYYY -> convertir a ISO
-      const [d, m, y] = fecha.split('/');
-      fechaISO = `${y}-${m}-${d}`;
-    } else if (!fecha.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      // Si no es ni DD/MM/YYYY ni ISO, intentar parsear como fecha válida
-      try {
-        const parsed = new Date(fecha);
-        if (isNaN(parsed.getTime())) return 0;
-        const y = parsed.getFullYear();
-        const m = String(parsed.getMonth() + 1).padStart(2, '0');
-        const d = String(parsed.getDate()).padStart(2, '0');
-        fechaISO = `${y}-${m}-${d}`;
-      } catch {
-        return 0;
-      }
+  // Confirmadas verdaderas (para gráfico)
+  const confirmedBase = sales.filter(s=> s.estadoEntrega === 'entregada' || s.estadoEntrega === 'confirmado');
+  // Base para tabla: confirmadas + canceladas liquidadas + canceladas con costo (todas) + pendientes
+  let confirmadas = sales.filter(s=> s.estadoEntrega === 'entregada' || s.estadoEntrega === 'confirmado' || ((s.estadoEntrega==='cancelado') && s.settledAt));
+  const canceladasConCosto = sales.filter(s=> s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0) > 0)
+    .map(s=> ({
+      ...s,
+      id: s.id+':canc', // id visual extra
+      idPorCobrar: s.idPorCobrar || s.id, // asegurar campo para flujo de depósito
+      originalId: s.id,
+  // Representar gasto como una salida: total y neto negativos
+  // (la tabla ya suma 'total' para monto y 'delivery' usa gasto normal; para canceladas con costo queremos que aparezca -gasto en Total)
+  total: -Number(s.gastoCancelacion||0),
+  gasto: Number(s.gastoCancelacion||0), // se muestra en columna Delivery como positivo (costo incurrido)
+  neto: -Number(s.gastoCancelacion||0),
+      cantidad: 0,
+      cantidadExtra: 0,
+      sku: '',
+      skuExtra: '',
+      sinteticaCancelada: true,
+      confirmadoAt: s.confirmadoAt || s.canceladoAt || 0
+    }));
+  confirmadas = [...confirmadas, ...canceladasConCosto];
+  const pendientesTabla = sales.filter(s=> (s.estadoEntrega||'')==='pendiente').map(s=> ({ ...s, esPendiente:true, neto:0 }));
+  let tablaVentas = [...confirmadas, ...pendientesTabla];
+  if(session?.rol !== 'admin') {
+    const myGroup = session.grupo || (users.find(u=>u.id===session.id)?.grupo)||'';
+    if(myGroup){
+      const filtroGrupo = (arr)=> arr.filter(s=>{
+        const vId = s.vendedoraId; if(vId){ const vu = users.find(u=>u.id===vId); return vu? vu.grupo===myGroup:false; }
+        const vu = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (s.vendedora||'').trim().toLowerCase()));
+        return vu? vu.grupo===myGroup:false;
+      });
+      confirmadas = filtroGrupo(confirmadas);
+      tablaVentas = filtroGrupo(tablaVentas);
     }
-    
-    // Obtener hora (puede venir como horaEntrega o hora)
-    const horaStr = (venta.horaEntrega || venta.hora || '').trim();
-    
-    // Convertir hora a minutos del día usando la función existente minutesFrom12
-    let minutosDia = 0;
-    if (horaStr) {
-      const minutos = minutesFrom12(horaStr.split('-')[0].trim());
-      // minutesFrom12 retorna 99999 si no puede parsear, tratarlo como 0 (medianoche)
-      minutosDia = minutos === 99999 ? 0 : minutos;
-    }
-    
-    // Convertir a timestamp: fecha en milisegundos + minutos en milisegundos
-    try {
-      const fechaDate = new Date(fechaISO + 'T00:00:00');
-      if (isNaN(fechaDate.getTime())) return 0;
-      const timestampBase = fechaDate.getTime();
-      // Agregar minutos del día (si hay hora válida)
-      return timestampBase + (minutosDia * 60 * 1000);
-    } catch {
-      return 0;
-    }
-  }, []);
-  
+  }
+
   // TABLA_ENTREGAS_CONFIRMADAS: tabla principal de entregas confirmadas en menú ventas
-  // Envolver tablaVentas en useMemo para que el ordenamiento se recalcule cuando cambia sales
-  const tablaVentas = useMemo(() => {
-    // Excluir ventas de PRUEBA para usuarios no admin
-    const salesFiltradas = session?.rol === 'admin' ? sales : sales.filter(s => (s.ciudad || '').toUpperCase() !== 'PRUEBA');
-    const confirmadas = salesFiltradas.filter(s=> (s.estadoEntrega==='entregada') || ((s.estadoEntrega||'confirmado')==='confirmado') && !s.settledAt);
-    const canceladasConCosto = salesFiltradas.filter(s=> s.estadoEntrega==='cancelado' && Number(s.gastoCancelacion||0) > 0)
-      .map(s=> ({
-        ...s,
-        id: s.id+':canc', // id visual extra
-        idPorCobrar: s.idPorCobrar || s.id, // asegurar campo para flujo de depósito
-        originalId: s.id,
-    // Representar gasto como una salida: total y neto negativos
-    // (la tabla ya suma 'total' para monto y 'delivery' usa gasto normal; para canceladas con costo queremos que aparezca -gasto en Total)
-    total: -Number(s.gastoCancelacion||0),
-    gasto: Number(s.gastoCancelacion||0), // se muestra en columna Delivery como positivo (costo incurrido)
-    neto: -Number(s.gastoCancelacion||0),
-        cantidad: 0,
-        cantidadExtra: 0,
-        sku: '',
-        skuExtra: '',
-        sinteticaCancelada: true,
-        confirmadoAt: s.confirmadoAt || s.canceladoAt || 0
-      }));
-    let combined = [...confirmadas, ...canceladasConCosto];
-    const pendientesTabla = salesFiltradas.filter(s=> (s.estadoEntrega||'')==='pendiente').map(s=> ({ ...s, esPendiente:true, neto:0 }));
-    let resultado = [...combined, ...pendientesTabla];
-    
-    if(session?.rol !== 'admin') {
-      const myGroup = session.grupo || (users.find(u=>u.id===session.id)?.grupo)||'';
-      if(myGroup){
-        const filtroGrupo = (arr)=> arr.filter(s=>{
-          const vId = s.vendedoraId; if(vId){ const vu = users.find(u=>u.id===vId); return vu? vu.grupo===myGroup:false; }
-          const vu = users.find(u=> (`${u.nombre} ${u.apellidos}`.trim().toLowerCase() === (s.vendedora||'').trim().toLowerCase()));
-          return vu? vu.grupo===myGroup:false;
-        });
-        resultado = filtroGrupo(resultado);
-      }
-    }
-    
-    return resultado;
-  }, [sales, session, users]);
-  
   const rows = useMemo(() => tablaVentas
     .slice()
     .sort((a, b) => {
-      // Prioridad 1: por fecha+hora combinada (más reciente primero) - PRIMERA PRIORIDAD
-      // Esto asegura que cuando editas fecha/hora, el ordenamiento se actualice inmediatamente
-      const timestampA = getDateTimeTimestamp(a);
-      const timestampB = getDateTimeTimestamp(b);
-      // Si ambas tienen fecha+hora válida, ordenar por eso
-      if (timestampA > 0 && timestampB > 0) {
-        if (timestampB !== timestampA) return timestampB - timestampA; // descendente
-      }
-      // Si solo una tiene fecha+hora válida, esa va primero
-      if (timestampA > 0 && timestampB === 0) return -1;
-      if (timestampA === 0 && timestampB > 0) return 1;
-      
-      // Prioridad 2: por fecha textual como fallback (más reciente primero)
-      // Solo si ninguna tiene timestamp válido o si ambos tienen el mismo
-      if ((a.fecha || '') !== (b.fecha || '')) {
-        // Intentar comparar como fechas ISO primero
-        const fechaA = a.fecha || '';
-        const fechaB = b.fecha || '';
-        // Si ambas son ISO (YYYY-MM-DD), comparar directamente
-        if (fechaA.match(/^\d{4}-\d{2}-\d{2}$/) && fechaB.match(/^\d{4}-\d{2}-\d{2}$/)) {
-          return fechaB.localeCompare(fechaA); // descendente
-        }
-        // Si ambas son DD/MM/YYYY, convertir a ISO para comparar
-        if (fechaA.match(/^\d{2}\/\d{2}\/\d{4}$/) && fechaB.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-          const [dA, mA, yA] = fechaA.split('/');
-          const [dB, mB, yB] = fechaB.split('/');
-          const isoA = `${yA}-${mA}-${dA}`;
-          const isoB = `${yB}-${mB}-${dB}`;
-          return isoB.localeCompare(isoA); // descendente
-        }
-        // Fallback: comparación textual
-        return fechaB.localeCompare(fechaA);
-      }
-      
-      // Prioridad 3: timestamp de confirmación o cancelación (reciente primero) - SOLO como fallback
+      // Prioridad: los que tienen timestamp de confirmación o cancelación (reciente primero)
       const ta = a.confirmadoAt || a.canceladoAt || 0;
       const tb = b.confirmadoAt || b.canceladoAt || 0;
-      if (tb !== ta) return tb - ta; // descendente
-      
-      // Prioridad 4: por id descendente para estabilidad
+      const aHas = !!ta; const bHas = !!tb;
+      if(aHas && !bHas) return -1;
+      if(!aHas && bHas) return 1;
+      if(tb !== ta) return tb - ta; // ambos tienen -> descendente
+      // Luego por fecha textual (más reciente primero)
+      if ((a.fecha || '') !== (b.fecha || '')) return (b.fecha || '').localeCompare(a.fecha || '');
+      // Luego por id descendente para estabilidad
       return (b.id || '').localeCompare(a.id || '');
     })
     .map(s => {
       // Adaptar para mostrar aunque falten campos
       const p1 = products.find(p => p.sku === s.sku);
       const p2 = s.skuExtra ? products.find(p => p.sku === s.skuExtra) : null;
-      // Solo mostrar el precio unitario, sin multiplicar por cantidad
-      // Usar solo el campo 'precio' del documento, nunca 'monto'
-      const precioUnit = s.precio != null ? Number(s.precio) : 0;
-      // El total solo si existe explícitamente
-      const total = s.total != null ? Number(s.total) : null;
+  // Solo mostrar el precio unitario, sin multiplicar por cantidad
+  // Usar solo el campo 'precio' del documento, nunca 'monto'
+  const precioUnit = s.precio != null ? Number(s.precio) : 0;
+  // El total solo si existe explícitamente
+  const total = s.total != null ? Number(s.total) : null;
       const gasto = Number(s.gasto || 0);
       // Calcular neto evitando doble resta del gasto.
       // Heurísticas:
@@ -6875,8 +6065,8 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt, onGo
         vendedor: s.vendedora || s.vendedoraId || '(sin vendedora)',
         productos: [p1?.nombre || s.sku || '(sin producto)', p2 ? p2.nombre : null].filter(Boolean).join(' + '),
         cantidades: [s.cantidad ?? '', s.cantidadExtra ?? ''].filter(v => v !== '').join(' + '),
-        precio: precioUnit,
-        total,
+  precio: precioUnit,
+  total,
         gasto,
         neto: netoCalc,
         metodo: s.metodo || '(sin método)',
@@ -6895,7 +6085,7 @@ function HistorialView({ sales, products, session, users=[], onOpenReceipt, onGo
         // Mostrar datos crudos si faltan campos clave
         _raw: s
       };
-    }), [tablaVentas, getDateTimeTimestamp, products]);
+    }), [tablaVentas, products]);
 
   // --- Filtros para tabla ---
   const hoy = todayISO();
@@ -7548,7 +6738,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   const [fecha, setFecha] = useState(todayISO());
   const isAdmin = session?.rol === 'admin';
   const today = todayISO();
-  const ciudades = getCiudadesFiltradas(session);
+  const ciudades = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ","PRUEBA"];
   const [ciudadVenta, setCiudadVenta] = useState(fixedCity || ciudades[0]);
   const visibleProducts = useMemo(()=>{
     const assigned = session.productos || [];
@@ -7568,7 +6758,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   const [cantidadExtra, setCantidadExtra] = useState(0);
   // Métodos disponibles restringidos a Delivery y Encomienda. Iniciar en Delivery.
   const [metodo, setMetodo] = useState("Delivery");
-  const [comprobanteFile, setComprobanteFile] = useState(null); // File para Supabase Storage
+  const [comprobanteFile, setComprobanteFile] = useState(null); // File para Cloudinary
   const [comprobanteUrl, setComprobanteUrl] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
   const [celular, setCelular] = useState("");
@@ -7613,12 +6803,10 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   if(!esSintetico && comprobanteFile){
     try {
       setSubiendo(true);
-      
-      // Usar Supabase Storage en todos los entornos
-      const { uploadComprobanteToSupabase } = await import('./supabaseStorage.js');
-      const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
-      comprobanteFinal = result.url || result.secure_url;
-      
+      const mod = await import('./cloudinary.js');
+      if(typeof mod.uploadProductImage !== 'function') throw new Error('uploadProductImage no encontrada');
+      const res = await mod.uploadProductImage(comprobanteFile, { folder:'comprobantes' });
+      comprobanteFinal = res.secure_url;
       setComprobanteUrl(comprobanteFinal);
     } catch(err){
       console.error('Error subiendo comprobante', err);
@@ -7627,12 +6815,6 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
       return;
     } finally { setSubiendo(false); }
   }
-  // Validación adicional: no permitir usar PRUEBA para usuarios no admin
-  if(session.rol !== 'admin' && (ciudadVenta || '').toUpperCase() === 'PRUEBA'){
-    toast.push({ type: 'error', title: 'Error', message: 'No puedes usar la ciudad PRUEBA.' });
-    return;
-  }
-  
   try {
     setSaving(true);
     await onSubmit({ fecha, ciudad: ciudadVenta, sku, cantidad: esSintetico?1:Number(cantidad), skuExtra: esSintetico? undefined : (skuExtra || undefined), cantidadExtra: esSintetico? undefined : (skuExtra ? Number(cantidadExtra) : undefined), precio: esSintetico?0:Number(precioTotal||0), horaEntrega, vendedora: session.nombre, vendedoraId: session.id, metodo: esSintetico? undefined : metodo, celular: esSintetico? undefined : celular, destinoEncomienda: (!esSintetico && metodo==='Encomienda')? destinoEncomienda.trim(): undefined, comprobante: esSintetico? undefined : (comprobanteFinal || undefined), motivo: esSintetico? motivo.trim(): undefined });
@@ -7738,10 +6920,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
                       if(f.size > 2*1024*1024){ toast.push({ type: 'error', title: 'Error', message: 'Archivo supera 2MB' }); return; }
                       setComprobanteFile(f);
                     }} className="text-xs" />
-                    <div className="text-[10px] text-neutral-500">Tamaño máximo 2MB. {(() => {
-                      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                      return isLocalhost ? 'Se subirá a Supabase Storage.' : 'Se subirá a Cloudinary.';
-                    })()}</div>
+                    <div className="text-[10px] text-neutral-500">Se subirá a Cloudinary al guardar (máx 2MB).</div>
                     {subiendo && <div className="text-[10px] text-blue-400">Subiendo...</div>}
                     {comprobanteUrl && <div className="text-[10px] text-green-400">Subido: <a href={comprobanteUrl} target="_blank" rel="noreferrer" className="underline">ver</a></div>}
                     {!comprobanteUrl && comprobanteFile && !subiendo && <div className="text-[10px] text-neutral-400">Listo para subir.</div>}
@@ -7770,7 +6949,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
 }
 
 // ---------------------- Registrar Venta (vista dedicada) ----------------------
-function RegisterSaleView({ products, setProducts, sales, setSales, session, dispatches, productsLoaded }) {
+function RegisterSaleView({ products, setProducts, sales, setSales, session, dispatches }) {
   const { push } = useToast();
   const [selectedCity, setSelectedCity] = useState(null);
   // Suscripción en tiempo real al stock de la ciudad seleccionada
@@ -7785,77 +6964,21 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
   }, [selectedCity]);
   const [showSale, setShowSale] = useState(false);
   const [initialSku, setInitialSku] = useState(null);
-  const cities = getCiudadesFiltradas(session);
-  
-  // Estado local para allowed que se actualiza cuando products o session cambian
-  const [allowed, setAllowed] = useState([]);
-  
-  // Recalcular allowed cada vez que products, productsLoaded o session cambien
-  useEffect(() => {
-    console.log('[RegisterSaleView] 🔄 useEffect de allowed ejecutado:', {
-      hasSession: !!session,
-      productsCount: products.length,
-      productsLoaded: productsLoaded,
-      view: window.location.hash
-    });
-    
-    if (!session) {
-      console.log('[RegisterSaleView] ⚠️ No hay session, allowed = []');
-      setAllowed([]);
-      return;
-    }
-    
+  const cities = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ","PRUEBA"];
+  const allowed = useMemo(() => {
     const assigned = session.productos || [];
-    
-    console.log('[RegisterSaleView] 📊 Recalculando allowed:', {
-      userId: session?.id,
-      rol: session?.rol,
-      productosAssigned: assigned,
-      productosLength: assigned.length,
-      allProductsCount: products.length,
-      isAdmin: session?.rol === 'admin',
-      productsLoaded: productsLoaded
-    });
-    
-    // Si no hay productos todavía, allowed = []
-    if (products.length === 0) {
-      console.log('[RegisterSaleView] ⏳ Products array está vacío - allowed = [] (esperando carga... productosLoaded:', productsLoaded, ')');
-      setAllowed([]);
-      return;
-    }
-    
-    // Calcular allowed
-    let newAllowed;
-    if (session.rol === 'admin' || assigned.length === 0) {
-      newAllowed = products;
-      console.log('[RegisterSaleView] ✅✅ Retornando TODOS los productos (admin o sin asignación):', newAllowed.length);
-    } else {
-      newAllowed = products.filter(p => assigned.includes(p.sku));
-      console.log('[RegisterSaleView] ✅✅ Productos FILTRADOS:', newAllowed.length, 'de', products.length, 'total');
-    }
-    
-    // Siempre actualizar cuando products cambia (forzar re-render)
-    console.log('[RegisterSaleView] 🔄🔄 ACTUALIZANDO allowed state:', {
-      previousCount: allowed.length,
-      newCount: newAllowed.length,
-      willUpdate: allowed.length !== newAllowed.length
-    });
-    setAllowed(newAllowed);
-  }, [products, products.length, productsLoaded, session]);
+    // Admin o vendedor con lista vacía => todos.
+    if (session.rol === 'admin' || assigned.length === 0) return products;
+    return products.filter(p => assigned.includes(p.sku));
+  }, [products, session]);
 
   function openSale(p){
-    if(!selectedCity) { push({ type: 'error', title: 'Error', message: 'Primero selecciona la ciudad.' }); return; }
+    if(!selectedCity) { toast.push({ type: 'error', title: 'Error', message: 'Primero selecciona la ciudad.' }); return; }
     setInitialSku(p.sku);
     setShowSale(true);
   }
 
   async function addSale(payload){
-    // Validación adicional: no permitir usar PRUEBA para usuarios no admin
-    if(session.rol !== 'admin' && (payload.ciudad || '').toUpperCase() === 'PRUEBA'){
-      push({ type:'error', title:'Error', message:'No puedes usar la ciudad PRUEBA.' });
-      return;
-    }
-    
     const product = products.find(p=>p.sku===payload.sku);
     if(!product) {
       push({ type:'error', title:'Producto', message:'Producto no encontrado' });
@@ -7986,8 +7109,8 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
 }
 
 // ---------------------- Ventas (listado dedicado) ----------------------
-function VentasView({ sales, setSales, products, session, dispatches, setDispatches, setProducts, setView, setDepositSnapshots, users = [] }) {
-  const cities = getCiudadesFiltradas(session); // removido 'SIN CIUDAD', excluye PRUEBA para no admin
+function VentasView({ sales, setSales, products, session, dispatches, setDispatches, setProducts, setView, setDepositSnapshots }) {
+  const cities = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ","PRUEBA"]; // removido 'SIN CIUDAD'
   const [cityFilter, setCityFilter] = useState(()=>{
     try {
       const saved = localStorage.getItem('ui.cityFilter');
@@ -8055,11 +7178,7 @@ function VentasView({ sales, setSales, products, session, dispatches, setDispatc
           <>
             <CityPendingShipments city={cityFilter} dispatches={dispatches} setDispatches={setDispatches} products={products} session={session} />
             <CityStock key={`${cityFilter}-${sales.length}`} city={cityFilter} products={products} sales={sales} dispatches={dispatches.filter(d=>d.status==='confirmado')} setSales={setSales} session={session} />
-            <CitySummary city={cityFilter} sales={sales.filter(s => {
-              // Excluir ventas de PRUEBA para usuarios no admin
-              if(session.rol === 'admin') return true;
-              return (s.ciudad || '').toUpperCase() !== 'PRUEBA';
-            })} setSales={setSales} products={products} session={session} setProducts={setProducts} setView={setView} setDepositSnapshots={setDepositSnapshots} users={users} />
+            <CitySummary city={cityFilter} sales={sales} setSales={setSales} products={products} session={session} setProducts={setProducts} setView={setView} setDepositSnapshots={setDepositSnapshots} />
           </>
         )}
   {/* Tabla de ventas removida a solicitud. */}
@@ -8069,7 +7188,7 @@ function VentasView({ sales, setSales, products, session, dispatches, setDispatc
 }
 
 // Resumen tipo cuadro para una ciudad seleccionada
-function CitySummary({ city, sales, setSales, products, session, setProducts, setView, setDepositSnapshots, users = [] }) {
+function CitySummary({ city, sales, setSales, products, session, setProducts, setView, setDepositSnapshots }) {
   // Replicar lógica de historial: solo mostrar confirmadas y canceladas con costo
   const cityNorm = useMemo(() => (city||'').toUpperCase(), [city]);
   
@@ -8098,96 +7217,15 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
     [sales, cityNorm]
   );
 
-  // Helper para convertir fecha+hora a timestamp comparable (usa minutesFrom12 que está disponible en App.jsx)
-  const getDateTimeTimestamp = useCallback((venta) => {
-    const fecha = venta.fecha || '';
-    if (!fecha) return 0;
-    
-    // Normalizar fecha a formato ISO (YYYY-MM-DD)
-    let fechaISO = fecha;
-    if (fecha.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-      // Formato DD/MM/YYYY -> convertir a ISO
-      const [d, m, y] = fecha.split('/');
-      fechaISO = `${y}-${m}-${d}`;
-    } else if (!fecha.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      // Si no es ni DD/MM/YYYY ni ISO, intentar parsear como fecha válida
-      try {
-        const parsed = new Date(fecha);
-        if (isNaN(parsed.getTime())) return 0;
-        const y = parsed.getFullYear();
-        const m = String(parsed.getMonth() + 1).padStart(2, '0');
-        const d = String(parsed.getDate()).padStart(2, '0');
-        fechaISO = `${y}-${m}-${d}`;
-      } catch {
-        return 0;
-      }
-    }
-    
-    // Obtener hora (puede venir como horaEntrega o hora)
-    const horaStr = (venta.horaEntrega || venta.hora || '').trim();
-    
-    // Convertir hora a minutos del día usando la función existente minutesFrom12
-    let minutosDia = 0;
-    if (horaStr) {
-      const minutos = minutesFrom12(horaStr.split('-')[0].trim());
-      // minutesFrom12 retorna 99999 si no puede parsear, tratarlo como 0 (medianoche)
-      minutosDia = minutos === 99999 ? 0 : minutos;
-    }
-    
-    // Convertir a timestamp: fecha en milisegundos + minutos en milisegundos
-    try {
-      const fechaDate = new Date(fechaISO + 'T00:00:00');
-      if (isNaN(fechaDate.getTime())) return 0;
-      const timestampBase = fechaDate.getTime();
-      // Agregar minutos del día (si hay hora válida)
-      return timestampBase + (minutosDia * 60 * 1000);
-    } catch {
-      return 0;
-    }
-  }, []);
-  
   const unificados = useMemo(() => [...confirmadas, ...canceladasConCosto], [confirmadas, canceladasConCosto]);
   
   const filtradas = useMemo(() => unificados.slice().sort((a,b)=> {
-    // Prioridad 1: por fecha+hora combinada (más reciente primero) - PRIMERA PRIORIDAD
-    const timestampA = getDateTimeTimestamp(a);
-    const timestampB = getDateTimeTimestamp(b);
-    // Si ambas tienen fecha+hora válida, ordenar por eso
-    if (timestampA > 0 && timestampB > 0) {
-      if (timestampB !== timestampA) return timestampB - timestampA; // descendente
-    }
-    // Si solo una tiene fecha+hora válida, esa va primero
-    if (timestampA > 0 && timestampB === 0) return -1;
-    if (timestampA === 0 && timestampB > 0) return 1;
-    
-    // Prioridad 2: por fecha textual como fallback (más reciente primero)
-    if ((a.fecha || '') !== (b.fecha || '')) {
-      const fechaA = a.fecha || '';
-      const fechaB = b.fecha || '';
-      // Si ambas son ISO (YYYY-MM-DD), comparar directamente
-      if (fechaA.match(/^\d{4}-\d{2}-\d{2}$/) && fechaB.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        return fechaB.localeCompare(fechaA); // descendente
-      }
-      // Si ambas son DD/MM/YYYY, convertir a ISO para comparar
-      if (fechaA.match(/^\d{2}\/\d{2}\/\d{4}$/) && fechaB.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-        const [dA, mA, yA] = fechaA.split('/');
-        const [dB, mB, yB] = fechaB.split('/');
-        const isoA = `${yA}-${mA}-${dA}`;
-        const isoB = `${yB}-${mB}-${dB}`;
-        return isoB.localeCompare(isoA); // descendente
-      }
-      // Fallback: comparación textual
-      return fechaB.localeCompare(fechaA);
-    }
-    
-    // Prioridad 3: timestamp de confirmación o cancelación - SOLO como fallback
     const ta = a.confirmadoAt || a.canceladoAt || 0;
     const tb = b.confirmadoAt || b.canceladoAt || 0;
     if(tb !== ta) return tb - ta;
-    
-    // Prioridad 4: por id descendente para estabilidad
+    if(a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
     return (b.id||'').localeCompare(a.id||'');
-  }), [unificados, getDateTimeTimestamp]);
+  }), [unificados]);
 
   // Construir filas (rows) que antes se usaban pero no estaban definidas -> causaba ReferenceError
   const rows = useMemo(() => filtradas.map(s=> {
@@ -8304,26 +7342,8 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
     ];
     return fields
       .map(f => {
-        let oldVal = original[f.key] ?? '';
-        let newVal = updated[f.key] ?? '';
-        
-        // Para vendedora: mostrar solo primer nombre en el modal
-        if (f.key === 'vendedora') {
-          oldVal = firstName(String(oldVal));
-          newVal = firstName(String(newVal));
-        }
-        
-        // Para campos numéricos: normalizar comparación (evitar falsos positivos)
-        const camposNumericos = ['precio', 'cantidad', 'cantidadExtra', 'gasto'];
-        if (camposNumericos.includes(f.key)) {
-          const oldNum = Number(oldVal || 0);
-          const newNum = Number(newVal || 0);
-          if (oldNum !== newNum) {
-            return { label: f.label, before: oldVal, after: newVal };
-          }
-          return null;
-        }
-        
+        const oldVal = original[f.key] ?? '';
+        const newVal = updated[f.key] ?? '';
         if (String(oldVal) !== String(newVal)) {
           return { label: f.label, before: oldVal, after: newVal };
         }
@@ -8409,11 +7429,15 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
             cantidadExtra: editForm.cantidadExtra != null ? editForm.cantidadExtra : s.cantidadExtra,
             precio: editForm.precio != null ? editForm.precio : s.precio,
             gasto: editForm.gasto != null ? editForm.gasto : s.gasto,
-            // Recalcular total si cambió precio o gasto
-            // total = precio - gasto (precio es fijo, no se multiplica por cantidad)
+            // Recalcular total si cambió precio o cantidad
             total: editForm.total != null ? editForm.total : (
-              editForm.precio != null || editForm.gasto != null
-                ? (Number(editForm.precio || s.precio || 0) - Number(editForm.gasto != null ? editForm.gasto : s.gasto || 0))
+              editForm.precio != null || editForm.cantidad != null 
+                ? (Number(editForm.precio || s.precio || 0) * Number(editForm.cantidad || s.cantidad || 0)) +
+                  (editForm.skuExtra && editForm.cantidadExtra 
+                    ? (products.find(p => p.sku === editForm.skuExtra)?.precio || 0) * Number(editForm.cantidadExtra || 0)
+                    : (s.skuExtra && s.cantidadExtra 
+                      ? (products.find(p => p.sku === s.skuExtra)?.precio || 0) * Number(s.cantidadExtra || 0)
+                      : 0))
                 : s.total
             )
           };
@@ -8825,19 +7849,7 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
                   </label>
                 )}
                 <label className="flex flex-col gap-1">Vendedor(a)
-                  <select value={editForm.vendedora || ''} onChange={e=>updateEditField('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
-                    <option value="">— Seleccionar —</option>
-                    {users.map(u => {
-                      const nombreCompleto = `${u.nombre || ''} ${u.apellidos || ''}`.trim();
-                      // Solo primera palabra del nombre (ej: "Wendy Nayeli" -> "Wendy")
-                      const primerNombre = (u.nombre || '').split(' ')[0] || u.id;
-                      return (
-                        <option key={u.id} value={nombreCompleto}>
-                          {primerNombre}
-                        </option>
-                      );
-                    })}
-                  </select>
+                  <input value={editForm.vendedora} onChange={e=>updateEditField('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
                 </label>
                 <label className="flex flex-col gap-1">Celular
                   <input value={editForm.celular} onChange={e=>updateEditField('celular', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
@@ -9010,7 +8022,7 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
 }
 
 // ---------------------- Vista Generar Depósito ----------------------
-function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users = [], onBack }) {
+function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBack }) {
   const toast = useToast();
   // Estado para mostrar el modal de detalle de pedidos
   const [showDepositDetail, setShowDepositDetail] = useState(false);
@@ -9056,101 +8068,33 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users
   }
   function cancelDeleteRow(){ setDeleteConfirm(null); }
   const [activeId, setActiveId] = useState(()=> snapshots?.length ? snapshots[snapshots.length-1].id : null); // última añadida
+  const active = snapshots.find(s=>s.id===activeId) || null;
   
-  // Calcular active desde snapshots (se recalcula cuando snapshots cambia)
-  const active = useMemo(() => {
-    return snapshots.find(s=>s.id===activeId) || null;
-  }, [snapshots, activeId]);
-  
-  // Helper para convertir fecha+hora a timestamp comparable (usa minutesFrom12 que está disponible en App.jsx)
-  const getDateTimeTimestamp = useCallback((venta) => {
-    const fecha = venta.fecha || '';
-    if (!fecha) return 0;
-    
-    // Normalizar fecha a formato ISO (YYYY-MM-DD)
-    let fechaISO = fecha;
-    if (fecha.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-      // Formato DD/MM/YYYY -> convertir a ISO
-      const [d, m, y] = fecha.split('/');
-      fechaISO = `${y}-${m}-${d}`;
-    } else if (!fecha.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      // Si no es ni DD/MM/YYYY ni ISO, intentar parsear como fecha válida
-      try {
-        const parsed = new Date(fecha);
-        if (isNaN(parsed.getTime())) return 0;
-        const y = parsed.getFullYear();
-        const m = String(parsed.getMonth() + 1).padStart(2, '0');
-        const d = String(parsed.getDate()).padStart(2, '0');
-        fechaISO = `${y}-${m}-${d}`;
-      } catch {
-        return 0;
-      }
+  // Ordenar filas por fecha y hora (más recientes primero, luego más tarde primero)
+  const sortedRows = active?.rows ? [...active.rows].sort((a, b) => {
+    // Primero por fecha (descendente: más recientes primero)
+    const fechaA = a.fecha || '';
+    const fechaB = b.fecha || '';
+    if (fechaA !== fechaB) {
+      return fechaB.localeCompare(fechaA); // Invertido para descendente
     }
-    
-    // Obtener hora (puede venir como horaEntrega o hora)
-    const horaStr = (venta.horaEntrega || venta.hora || '').trim();
-    
-    // Convertir hora a minutos del día usando la función existente minutesFrom12
-    let minutosDia = 0;
-    if (horaStr) {
-      const minutos = minutesFrom12(horaStr.split('-')[0].trim());
-      // minutesFrom12 retorna 99999 si no puede parsear, tratarlo como 0 (medianoche)
-      minutosDia = minutos === 99999 ? 0 : minutos;
-    }
-    
-    // Convertir a timestamp: fecha en milisegundos + minutos en milisegundos
-    try {
-      const fechaDate = new Date(fechaISO + 'T00:00:00');
-      if (isNaN(fechaDate.getTime())) return 0;
-      const timestampBase = fechaDate.getTime();
-      // Agregar minutos del día (si hay hora válida)
-      return timestampBase + (minutosDia * 60 * 1000);
-    } catch {
-      return 0;
-    }
-  }, []);
-  
-  // Ordenar filas usando la misma lógica mejorada (fecha+hora como primera prioridad)
-  // useMemo asegura que se recalcule cuando active o getDateTimeTimestamp cambien
-  const sortedRows = useMemo(() => {
-    if (!active?.rows) return [];
-    
-    return [...active.rows].sort((a, b) => {
-    // Prioridad 1: por fecha+hora combinada (más reciente primero) - PRIMERA PRIORIDAD
-    const timestampA = getDateTimeTimestamp(a);
-    const timestampB = getDateTimeTimestamp(b);
-    // Si ambas tienen fecha+hora válida, ordenar por eso
-    if (timestampA > 0 && timestampB > 0) {
-      if (timestampB !== timestampA) return timestampB - timestampA; // descendente
-    }
-    // Si solo una tiene fecha+hora válida, esa va primero
-    if (timestampA > 0 && timestampB === 0) return -1;
-    if (timestampA === 0 && timestampB > 0) return 1;
-    
-    // Prioridad 2: por fecha textual como fallback (más reciente primero)
-    if ((a.fecha || '') !== (b.fecha || '')) {
-      const fechaA = a.fecha || '';
-      const fechaB = b.fecha || '';
-      // Si ambas son ISO (YYYY-MM-DD), comparar directamente
-      if (fechaA.match(/^\d{4}-\d{2}-\d{2}$/) && fechaB.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        return fechaB.localeCompare(fechaA); // descendente
-      }
-      // Si ambas son DD/MM/YYYY, convertir a ISO para comparar
-      if (fechaA.match(/^\d{2}\/\d{2}\/\d{4}$/) && fechaB.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-        const [dA, mA, yA] = fechaA.split('/');
-        const [dB, mB, yB] = fechaB.split('/');
-        const isoA = `${yA}-${mA}-${dA}`;
-        const isoB = `${yB}-${mB}-${dB}`;
-        return isoB.localeCompare(isoA); // descendente
-      }
-      // Fallback: comparación textual
-      return fechaB.localeCompare(fechaA);
-    }
-    
-    // Prioridad 3: por id descendente para estabilidad
-    return (b.id || '').localeCompare(a.id || '');
-    });
-  }, [active, getDateTimeTimestamp]);
+    // Si la fecha es igual, ordenar por hora (descendente: más tarde primero)
+    const horaA = a.hora || a.horaEntrega || '';
+    const horaB = b.hora || b.horaEntrega || '';
+    // Convertir hora a formato comparable (ej: "4:00 PM" -> "16:00")
+    const parseHora = (h) => {
+      if (!h) return '00:00';
+      const match = h.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!match) return h;
+      let horas = parseInt(match[1], 10);
+      const minutos = parseInt(match[2], 10);
+      const periodo = match[3].toUpperCase();
+      if (periodo === 'PM' && horas !== 12) horas += 12;
+      if (periodo === 'AM' && horas === 12) horas = 0;
+      return `${horas.toString().padStart(2, '0')}:${minutos.toString().padStart(2, '0')}`;
+    };
+    return parseHora(horaB).localeCompare(parseHora(horaA)); // Invertido para descendente
+  }) : [];
   
   const [montoDepositado, setMontoDepositado] = useState('');
   const [nota, setNota] = useState('');
@@ -9227,10 +8171,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users
   }
 
   function saveEdit(e) {
-    // El evento puede ser undefined si se llama directamente (sin onSubmit)
-    if (e && typeof e.preventDefault === 'function') {
-      e.preventDefault();
-    }
+    e.preventDefault();
     if (!editingRow) return;
     // Construir el nuevo objeto editado
     let newRow;
@@ -9252,7 +8193,6 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users
       const g = Math.max(0, Number(formValues.gasto || 0) || 0);
       const cant = Math.max(0, Number(formValues.cantidad || 0) || 0);
       const cantExtra = Math.max(0, Number(formValues.cantidadExtra || 0) || 0);
-      // total = precio - gasto (precio es fijo, no se multiplica por cantidad)
       newRow = {
         ...editingRow,
         fecha: formValues.fecha || '',
@@ -9262,7 +8202,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users
         vendedora: formValues.vendedora || '',
         celular: formValues.celular || '',
         precio: p,
-        total: p - g, // total = precio - gasto
+        total: p,
         gasto: g,
         neto: p - g,
         cantidad: cant,
@@ -9665,18 +8605,7 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users
                 </select>
               </label>
               <label className="flex flex-col gap-1">Vendedor(a)
-                <select value={formValues.vendedora || ''} onChange={e=>updateForm('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
-                  <option value="">— Seleccionar —</option>
-                  {users.map(u => {
-                    const nombreCompleto = `${u.nombre || ''} ${u.apellidos || ''}`.trim();
-                    const primerNombre = u.nombre ? u.nombre.split(' ')[0] : u.id; // Extract first name
-                    return (
-                      <option key={u.id} value={nombreCompleto}>
-                        {primerNombre}
-                      </option>
-                    );
-                  })}
-                </select>
+                <input value={formValues.vendedora || ''} onChange={e=>updateForm('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
               </label>
               <label className="flex flex-col gap-1">Celular
                 <input value={formValues.celular || ''} onChange={e=>updateForm('celular', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
