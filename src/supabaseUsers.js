@@ -210,13 +210,26 @@ export function subscribeCollection(tableName, callback, options = {}) {
   // Ejecutar query inicial
   query.then(({ data, error }) => {
     if (error) {
-      console.error(`[subscribeCollection] Error obteniendo ${tableName}:`, error);
+      console.error(`[subscribeCollection] ❌ Error obteniendo ${tableName}:`, error);
       callback([]);
       return;
     }
 
+    console.log(`[subscribeCollection] 📊 Query ejecutada para ${tableName}:`, {
+      rawDataCount: (data || []).length,
+      hasData: !!(data && data.length > 0),
+      firstItem: data?.[0] || null,
+      tableName: tableName,
+      supabaseTable: supabaseTable
+    });
+
     // Normalizar datos según el tipo de tabla
     const normalized = normalizeData(tableName, data || []);
+    console.log(`[subscribeCollection] ✅ Datos iniciales cargados para ${tableName}:`, {
+      normalizedCount: normalized.length,
+      rawCount: (data || []).length,
+      firstNormalized: normalized[0] || null
+    });
     callback(normalized);
   });
 
@@ -270,6 +283,7 @@ export function subscribeCollection(tableName, callback, options = {}) {
           }
 
           const normalized = normalizeData(tableName, data || []);
+          console.log(`[subscribeCollection] Datos actualizados (realtime) para ${tableName}:`, normalized.length, 'items');
           callback(normalized);
         }
       )

@@ -418,7 +418,9 @@ function getCiudadesFiltradas(session){
 }
 
 function App() {
+  console.log('[App] 🟢 App component MONTANDO/RE-RENDERIZANDO');
   const [products, setProducts] = useState([]);
+  const [productsLoaded, setProductsLoaded] = useState(false); // Flag para indicar que los productos se han cargado al menos una vez
     try { log('[APP] Montando App.jsx. location.hash=', window.location.hash); } catch {}
   const [users, setUsers] = useState(() => loadLS(LS_KEYS.users, seedUsers)
     .map(u=> (u.id==='v1' && u.nombre==='Ana') ? { ...u, nombre:'Beatriz', apellidos:'vargas' } : u)
@@ -1132,10 +1134,72 @@ function App() {
   }, []);
 
   // Sincroniza productos en tiempo real desde Firestore (colección almacenCentral)
+  // IMPORTANTE: Esperar a que haya sesión para evitar problemas de RLS
   useEffect(() => {
-    const unsub = subscribeCollection('almacenCentral', setProducts);
-    return () => unsub();
-  }, []);
+    // No suscribirse si no hay sesión (el usuario aún no está autenticado)
+    if (!session) {
+      console.log('[App] ⏸️ No hay sesión aún, esperando para suscribirse a productos...');
+      setProducts([]);
+      setProductsLoaded(false);
+      return;
+    }
+    
+    console.log('[App] 🔵🔵🔵 useEffect de productos EJECUTÁNDOSE - INICIANDO suscripción a almacenCentral...', {
+      hasSession: !!session,
+      userId: session?.id,
+      rol: session?.rol
+    });
+    
+    let mounted = true;
+    let unsubFn = null;
+    
+    try {
+      const unsub = subscribeCollection('almacenCentral', (newProducts) => {
+        console.log('[App] 📦 Callback de productos ejecutado:', {
+          mounted: mounted,
+          count: newProducts.length,
+          firstProduct: newProducts[0]?.nombre || 'N/A',
+          timestamp: new Date().toISOString()
+        });
+        
+        // Actualizar productos siempre, incluso si mounted es false (React StrictMode puede causar esto)
+        // Pero solo actualizar el estado si realmente el componente está montado
+        if (mounted) {
+          console.log('[App] ✅ Componente montado, actualizando productos');
+          setProducts(newProducts);
+          if (newProducts.length > 0) {
+            setProductsLoaded(true);
+            console.log('[App] ✅✅ PRODUCTOS CARGADOS:', newProducts.length, 'productos disponibles');
+          } else {
+            console.warn('[App] ⚠️ Se recibieron 0 productos. Verifica que haya datos en almacen_central y que RLS permita lectura.');
+            // Aún así marcar como cargado para evitar loops infinitos
+            setProductsLoaded(true);
+          }
+        } else {
+          console.warn('[App] ⚠️ Componente desmontado (StrictMode), pero productos recibidos:', newProducts.length);
+          // En StrictMode, puede que se desmonte y monte de nuevo rápidamente
+          // Si recibimos datos, guardarlos de todos modos
+          setProducts(newProducts);
+          if (newProducts.length > 0) {
+            setProductsLoaded(true);
+          }
+        }
+      });
+      
+      unsubFn = unsub;
+      console.log('[App] ✅ Suscripción configurada, unsub function:', typeof unsub);
+      
+      return () => {
+        console.log('[App] 🔴 Cleanup: desuscribiendo de almacenCentral (mounted:', mounted, ')');
+        mounted = false;
+        if (unsubFn && typeof unsubFn === 'function') {
+          unsubFn();
+        }
+      };
+    } catch (error) {
+      console.error('[App] ❌ ERROR en useEffect de productos:', error);
+    }
+  }, [session]); // Agregar session como dependencia
 
   // Suscripción en tiempo real a cityStock (ejemplo: puedes guardar en un estado aparte)
   const [cityStock, setCityStock] = useState([]);
@@ -1309,7 +1373,7 @@ function App() {
               className="absolute inset-0 pb-safe"
             >
               <div className="relative w-full h-full flex flex-col bg-[#121f27]">
-                <RegisterSaleView products={products} setProducts={setProducts} sales={sales} setSales={setSales} session={session} dispatches={dispatches} />
+                <RegisterSaleView products={products} setProducts={setProducts} sales={sales} setSales={setSales} session={session} dispatches={dispatches} productsLoaded={productsLoaded} />
                 {/* Anti-flash fondo blanco en extremos inferiores iOS/Android */}
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-b from-transparent to-[#121f27]"></div>
               </div>
@@ -7657,7 +7721,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
 }
 
 // ---------------------- Registrar Venta (vista dedicada) ----------------------
-function RegisterSaleView({ products, setProducts, sales, setSales, session, dispatches }) {
+function RegisterSaleView({ products, setProducts, sales, setSales, session, dispatches, productsLoaded }) {
   const { push } = useToast();
   const [selectedCity, setSelectedCity] = useState(null);
   // Suscripción en tiempo real al stock de la ciudad seleccionada
@@ -7673,30 +7737,65 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
   const [showSale, setShowSale] = useState(false);
   const [initialSku, setInitialSku] = useState(null);
   const cities = getCiudadesFiltradas(session);
-  const allowed = useMemo(() => {
+  
+  // Estado local para allowed que se actualiza cuando products o session cambian
+  const [allowed, setAllowed] = useState([]);
+  
+  // Recalcular allowed cada vez que products, productsLoaded o session cambien
+  useEffect(() => {
+    console.log('[RegisterSaleView] 🔄 useEffect de allowed ejecutado:', {
+      hasSession: !!session,
+      productsCount: products.length,
+      productsLoaded: productsLoaded,
+      view: window.location.hash
+    });
+    
+    if (!session) {
+      console.log('[RegisterSaleView] ⚠️ No hay session, allowed = []');
+      setAllowed([]);
+      return;
+    }
+    
     const assigned = session.productos || [];
-    // Debug: Log para diagnosticar problema en Vercel
-    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
-      console.log('[RegisterSaleView] Debug productos:', {
-        userId: session?.id,
-        rol: session?.rol,
-        productosAssigned: assigned,
-        productosLength: assigned.length,
-        allProductsCount: products.length,
-        isAdmin: session?.rol === 'admin'
-      });
+    
+    console.log('[RegisterSaleView] 📊 Recalculando allowed:', {
+      userId: session?.id,
+      rol: session?.rol,
+      productosAssigned: assigned,
+      productosLength: assigned.length,
+      allProductsCount: products.length,
+      isAdmin: session?.rol === 'admin',
+      productsLoaded: productsLoaded
+    });
+    
+    // Si no hay productos todavía, allowed = []
+    if (products.length === 0) {
+      console.log('[RegisterSaleView] ⏳ Products array está vacío - allowed = [] (esperando carga... productosLoaded:', productsLoaded, ')');
+      setAllowed([]);
+      return;
     }
-    // Admin o vendedor con lista vacía => todos.
-    if (session.rol === 'admin' || assigned.length === 0) return products;
-    const filtered = products.filter(p => assigned.includes(p.sku));
-    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
-      console.log('[RegisterSaleView] Productos filtrados:', filtered.length);
+    
+    // Calcular allowed
+    let newAllowed;
+    if (session.rol === 'admin' || assigned.length === 0) {
+      newAllowed = products;
+      console.log('[RegisterSaleView] ✅✅ Retornando TODOS los productos (admin o sin asignación):', newAllowed.length);
+    } else {
+      newAllowed = products.filter(p => assigned.includes(p.sku));
+      console.log('[RegisterSaleView] ✅✅ Productos FILTRADOS:', newAllowed.length, 'de', products.length, 'total');
     }
-    return filtered;
-  }, [products, session]);
+    
+    // Siempre actualizar cuando products cambia (forzar re-render)
+    console.log('[RegisterSaleView] 🔄🔄 ACTUALIZANDO allowed state:', {
+      previousCount: allowed.length,
+      newCount: newAllowed.length,
+      willUpdate: allowed.length !== newAllowed.length
+    });
+    setAllowed(newAllowed);
+  }, [products, products.length, productsLoaded, session]);
 
   function openSale(p){
-    if(!selectedCity) { toast.push({ type: 'error', title: 'Error', message: 'Primero selecciona la ciudad.' }); return; }
+    if(!selectedCity) { push({ type: 'error', title: 'Error', message: 'Primero selecciona la ciudad.' }); return; }
     setInitialSku(p.sku);
     setShowSale(true);
   }
