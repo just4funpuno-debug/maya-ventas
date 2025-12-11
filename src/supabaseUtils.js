@@ -480,8 +480,7 @@ export async function editarVentaConfirmada(idPorCobrar, idHistorico, ventaAnter
     }
 
     // Calcular total actualizado
-    // total = precio - gasto (precio es fijo, no se multiplica por cantidad)
-    const total = (Number(ventaNueva.precio || ventaAnterior.precio || 0)) - (Number(ventaNueva.gasto || ventaAnterior.gasto || 0));
+    const total = (Number(ventaNueva.precio) || 0) - (Number(ventaNueva.gasto) || 0);
 
     // Preparar actualización
     const updates = {

@@ -1,8 +1,8 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App'
-import { ToastProvider } from './components/ToastProvider'
+import App from './App.jsx'
+import { ToastProvider } from './components/ToastProvider.jsx'
 import { validateEnv } from './utils/envValidation'
 
 // Validar variables de entorno al inicio de la aplicación

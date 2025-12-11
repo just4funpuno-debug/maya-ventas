@@ -1,13 +1,11 @@
 /**
  * Servicio para enviar mensajes via WhatsApp Cloud API
  * FASE 2: API para enviar mensajes via Cloud API
- * FASE 4: SUBFASE 4.1 - Envío de templates
  * 
  * Documentación: https://developers.facebook.com/docs/whatsapp/cloud-api
  */
 
 import { supabase } from '../../supabaseClient';
-import { mapTemplateVariables } from './templates';
 
 const GRAPH_API_VERSION = 'v18.0';
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;

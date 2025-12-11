@@ -92,11 +92,8 @@ export default function WhatsAppAccountManager({ session }) {
       let filteredAccounts = data || [];
       
       // Si hay un producto seleccionado, filtrar también por product_id
-      // PERO también mostrar cuentas sin product_id (para que puedan ser asignadas)
       if (selectedProductId) {
-        filteredAccounts = filteredAccounts.filter(acc => 
-          acc.product_id === selectedProductId || acc.product_id === null || acc.product_id === undefined
-        );
+        filteredAccounts = filteredAccounts.filter(acc => acc.product_id === selectedProductId);
       }
       
       setAccounts(filteredAccounts);
@@ -312,7 +309,6 @@ export default function WhatsAppAccountManager({ session }) {
             onSubmit={handleSubmit}
             onCancel={handleCancelForm}
             isLoading={isSubmitting}
-            onOAuthSuccess={loadAccounts}
           />
         </div>
       )}

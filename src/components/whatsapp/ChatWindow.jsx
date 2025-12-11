@@ -638,7 +638,7 @@ export default function ChatWindow({ contactId, onBack, accountId, session, onOp
         <MessageSender
           contactId={contactId}
           accountId={accountId}
-          productId={accountProductId}
+          productId={selectedProductId}
           onMessageSent={handleMessageSent}
           replyToMessage={replyToMessage}
           onCancelReply={() => setReplyToMessage(null)}

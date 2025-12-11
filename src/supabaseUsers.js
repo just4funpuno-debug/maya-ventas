@@ -1,130 +1,18 @@
 /**
- * Utilidades para manejar usuarios y suscripciones genéricas
+ * Utilidades para manejar usuarios y suscripciones genéricas en Supabase
+ * Fase 7.4: Reemplazo de firestoreUsers.js
  * 
- * IMPORTANTE: Nunca guardar contraseñas aquí; sólo en Auth.
- * 
- * Este módulo usa Supabase en todos los entornos (desarrollo y producción).
- * Migración completa desde Firebase a Supabase completada.
+ * IMPORTANTE: Nunca guardar contraseñas aquí; sólo en Supabase Auth.
  */
 
-import { isDev } from './utils/envValidation';
+import { supabase } from './supabaseClient.js';
 import { denormalizeCity } from './utils/cityUtils';
 
-// Importar cliente Supabase
-let supabase = null;
-
-// Lazy loading de clientes
-async function getSupabaseClient() {
-  if (!supabase) {
-    try {
-      const { supabase: client } = await import('./supabaseClient.js');
-      supabase = client;
-    } catch (error) {
-      console.warn('[getSupabaseClient] Error importando cliente Supabase:', error);
-      return null;
-    }
-  }
-  return supabase;
-}
-
 /**
- * Suscripción a Firebase Firestore (solo en producción)
- */
-function subscribeCollectionFirebase(tableName, callback, options = {}) {
-  let unsubscribeFn = null;
-  
-  // Importar Firebase dinámicamente - usar paths completamente dinámicos para evitar análisis estático
-  // Construir paths en runtime para que Vite no pueda analizarlos estáticamente
-  const baseDir = '../';
-  const deprecated = '_deprecated';
-  const firebaseFile = 'firebase';
-  const firebaseMod = 'firebase';
-  const firestoreMod = 'firestore';
-  
-  const firebasePath = `${baseDir}${deprecated}/${firebaseFile}`;
-  const firestorePath = `${firebaseMod}/${firestoreMod}`;
-  
-  Promise.all([
-    import(/* @vite-ignore */ firebasePath).catch(() => null),
-    import(/* @vite-ignore */ firestorePath).catch(() => null)
-  ]).then((results) => {
-    if (!results[0] || !results[1]) {
-      console.warn('[subscribeCollectionFirebase] Firebase no disponible');
-      callback([]);
-      return;
-    }
-    const [{ db }, firestore] = results;
-    const { collection, onSnapshot, query, where, orderBy, limit } = firestore;
-    const colRef = collection(db, tableName);
-    let firestoreQuery = colRef;
-    
-    // Aplicar filtros específicos según el tipo de colección
-    if (tableName === 'ventasporcobrar') {
-      firestoreQuery = query(firestoreQuery, where('estadoEntrega', 'in', ['confirmado', 'entregada', 'cancelado']));
-    } else if (tableName === 'VentasSinConfirmar') {
-      firestoreQuery = query(firestoreQuery, where('estadoEntrega', '==', 'pendiente'));
-    } else if (tableName === 'ventashistorico') {
-      firestoreQuery = query(firestoreQuery, where('estadoEntrega', 'in', ['confirmado', 'entregada', 'cancelado']));
-    } else if (tableName === 'despachos') {
-      firestoreQuery = query(firestoreQuery, where('status', '==', 'pendiente'));
-    } else if (tableName === 'despachosHistorial') {
-      firestoreQuery = query(firestoreQuery, where('status', '==', 'confirmado'));
-    }
-    
-    // Aplicar filtros adicionales
-    if (options.filters) {
-      Object.entries(options.filters).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          firestoreQuery = query(firestoreQuery, where(key, '==', value));
-        }
-      });
-    }
-    
-    // Aplicar ordenamiento
-    if (options.orderBy) {
-      firestoreQuery = query(
-        firestoreQuery,
-        orderBy(
-          options.orderBy.column,
-          options.orderBy.ascending !== false ? 'asc' : 'desc'
-        )
-      );
-    }
-    
-    // Aplicar límite
-    if (options.limit) {
-      firestoreQuery = query(firestoreQuery, limit(options.limit));
-    }
-    
-    // Suscribirse a cambios
-    unsubscribeFn = onSnapshot(firestoreQuery, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const normalized = normalizeData(tableName, list);
-      callback(normalized);
-    }, (error) => {
-      console.error(`[subscribeCollectionFirebase] Error en ${tableName}:`, error);
-      callback([]);
-    });
-  }).catch(error => {
-    console.error(`[subscribeCollectionFirebase] Error inicializando Firebase:`, error);
-    callback([]);
-  });
-  
-  // Retornar función de desuscripción
-  return () => {
-    if (unsubscribeFn) {
-      unsubscribeFn();
-    }
-  };
-}
-
-/**
- * Suscripción genérica a cualquier tabla/colección
- * Detecta automáticamente el entorno:
- * - Desarrollo: Usa Supabase
- * - Producción: Usa Firebase
+ * Suscripción genérica a cualquier tabla de Supabase
+ * Reemplaza: firestoreUsers.subscribeCollection()
  * 
- * @param {string} tableName - Nombre de la tabla/colección
+ * @param {string} tableName - Nombre de la tabla
  * @param {function} callback - Función que recibe el array de datos
  * @param {object} options - Opciones adicionales (filters, orderBy, etc.)
  * @returns {function} - Función para desuscribirse
@@ -134,42 +22,26 @@ export function subscribeCollection(tableName, callback, options = {}) {
     return () => {};
   }
 
-  // Siempre usar Supabase en todos los entornos
-
-  // Desarrollo con Supabase disponible: usar Supabase
   // Mapeo de colecciones de Firebase a tablas de Supabase
   const tableMap = {
-    'almacenCentral': 'almacen_central',
+    'almacenCentral': 'almacen_central', // Cambiado de 'products' a 'almacen_central' (FASE 1)
     'cityStock': 'city_stock',
     'despachos': 'dispatches',
     'despachosHistorial': 'dispatches',
-    'numbers': 'mis_numeros',
+    'numbers': 'mis_numeros', // Renombrado de 'numbers' a 'mis_numeros'
     'team_messages': 'team_messages',
     'users': 'users',
-    'VentasSinConfirmar': 'ventas',
-    'ventasporcobrar': 'ventas',
-    'ventashistorico': 'ventas',
+    'VentasSinConfirmar': 'ventas', // Cambiado de 'sales' a 'ventas' (FASE 2)
+    'ventasporcobrar': 'ventas', // Cambiado de 'sales' a 'ventas' (FASE 2)
+    'ventashistorico': 'ventas', // Cambiado de 'sales' a 'ventas' (FASE 2)
     'GenerarDeposito': 'generar_deposito',
-    'grupos': 'grupos'
+    'grupos': 'grupos' // Tabla de grupos para vendedoras
   };
 
   const supabaseTable = tableMap[tableName] || tableName;
 
-  // Verificar si Supabase está disponible antes de intentar usarlo
-  let unsubscribeFn = null;
-  let supabaseAvailable = false;
-
-  // Obtener datos iniciales y configurar suscripción
-  getSupabaseClient().then(client => {
-    if (!client || client._isDummy) {
-      console.error(`❌ ERROR: Supabase no disponible para ${tableName}. Por favor configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.`);
-      callback([]);
-      return;
-    }
-
-    supabaseAvailable = true;
-
-    let query = client.from(supabaseTable).select('*');
+  // Obtener datos iniciales
+  let query = supabase.from(supabaseTable).select('*');
 
   // Aplicar filtros específicos según el tipo de colección
   if (tableName === 'ventasporcobrar') {
@@ -210,97 +82,86 @@ export function subscribeCollection(tableName, callback, options = {}) {
   // Ejecutar query inicial
   query.then(({ data, error }) => {
     if (error) {
-      console.error(`[subscribeCollection] ❌ Error obteniendo ${tableName}:`, error);
+      console.error(`[subscribeCollection] Error obteniendo ${tableName}:`, error);
       callback([]);
       return;
     }
 
-    console.log(`[subscribeCollection] 📊 Query ejecutada para ${tableName}:`, {
-      rawDataCount: (data || []).length,
-      hasData: !!(data && data.length > 0),
-      firstItem: data?.[0] || null,
-      tableName: tableName,
-      supabaseTable: supabaseTable
-    });
-
     // Normalizar datos según el tipo de tabla
     const normalized = normalizeData(tableName, data || []);
-    console.log(`[subscribeCollection] ✅ Datos iniciales cargados para ${tableName}:`, {
-      normalizedCount: normalized.length,
-      rawCount: (data || []).length,
-      firstNormalized: normalized[0] || null
-    });
     callback(normalized);
   });
 
-    // Suscripción en tiempo real
-    const channel = client
-      .channel(`${tableName}_changes`)
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: supabaseTable 
-        }, 
-        async () => {
-          // Obtener datos actualizados después del cambio
-          let refreshQuery = client.from(supabaseTable).select('*');
-          
-          // Aplicar los mismos filtros que en la query inicial
-          if (tableName === 'ventasporcobrar') {
-            refreshQuery = refreshQuery
-              .is('deleted_from_pending_at', null)
-              .eq('estado_pago', 'pendiente')
-              .is('settled_at', null)
-              .in('estado_entrega', ['confirmado', 'entregada', 'cancelado']);
-          } else if (tableName === 'VentasSinConfirmar') {
-            refreshQuery = refreshQuery.eq('estado_entrega', 'pendiente');
-          } else if (tableName === 'ventashistorico') {
-            refreshQuery = refreshQuery.in('estado_entrega', ['confirmado', 'entregada', 'cancelado']);
-          } else if (tableName === 'despachos') {
-            refreshQuery = refreshQuery.eq('status', 'pendiente');
-          } else if (tableName === 'despachosHistorial') {
-            refreshQuery = refreshQuery.eq('status', 'confirmado');
-          }
-          
-          if (options.filters) {
-            Object.entries(options.filters).forEach(([key, value]) => {
-              if (value !== undefined && value !== null) {
-                refreshQuery = refreshQuery.eq(key, value);
-              }
-            });
-          }
-          
-          if (options.orderBy) {
-            refreshQuery = refreshQuery.order(options.orderBy.column, { ascending: options.orderBy.ascending !== false });
-          }
-
-          const { data, error } = await refreshQuery;
-          
-          if (error) {
-            console.error(`[subscribeCollection] Error refrescando ${tableName}:`, error);
-            return;
-          }
-
-          const normalized = normalizeData(tableName, data || []);
-          console.log(`[subscribeCollection] Datos actualizados (realtime) para ${tableName}:`, normalized.length, 'items');
-          callback(normalized);
+  // Suscripción en tiempo real
+  const channel = supabase
+    .channel(`${tableName}_changes`)
+    .on('postgres_changes', 
+      { 
+        event: '*', 
+        schema: 'public', 
+        table: supabaseTable 
+      }, 
+      async () => {
+        // Obtener datos actualizados después del cambio
+        let refreshQuery = supabase.from(supabaseTable).select('*');
+        
+        // Aplicar los mismos filtros que en la query inicial
+        if (tableName === 'ventasporcobrar') {
+          refreshQuery = refreshQuery
+            .is('deleted_from_pending_at', null)
+            .eq('estado_pago', 'pendiente')
+            .is('settled_at', null)
+            .in('estado_entrega', ['confirmado', 'entregada', 'cancelado']);
+        } else if (tableName === 'VentasSinConfirmar') {
+          refreshQuery = refreshQuery.eq('estado_entrega', 'pendiente');
+        } else if (tableName === 'ventashistorico') {
+          refreshQuery = refreshQuery.in('estado_entrega', ['confirmado', 'entregada', 'cancelado']);
+        } else if (tableName === 'despachos') {
+          refreshQuery = refreshQuery.eq('status', 'pendiente');
+        } else if (tableName === 'despachosHistorial') {
+          refreshQuery = refreshQuery.eq('status', 'confirmado');
         }
-      )
-      .subscribe();
 
-    // Guardar función de desuscripción
-    unsubscribeFn = () => channel.unsubscribe();
-  }).catch(error => {
-    console.error(`❌ ERROR: Error en Supabase para ${tableName}:`, error);
-    callback([]);
-  });
+        // Aplicar filtros específicos según el tipo de colección
+        if (tableName === 'ventasporcobrar') {
+          refreshQuery = refreshQuery
+            .is('deleted_from_pending_at', null)
+            .eq('estado_pago', 'pendiente')
+            .is('settled_at', null)
+            .in('estado_entrega', ['confirmado', 'entregada', 'cancelado']);
+        } else if (tableName === 'VentasSinConfirmar') {
+          refreshQuery = refreshQuery.eq('estado_entrega', 'pendiente');
+        } else if (tableName === 'ventashistorico') {
+          refreshQuery = refreshQuery.in('estado_entrega', ['confirmado', 'entregada', 'cancelado']);
+        }
+        
+        if (options.filters) {
+          Object.entries(options.filters).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+              refreshQuery = refreshQuery.eq(key, value);
+            }
+          });
+        }
+        
+        if (options.orderBy) {
+          refreshQuery = refreshQuery.order(options.orderBy.column, { ascending: options.orderBy.ascending !== false });
+        }
 
-  // Retornar función de desuscripción que se actualizará cuando se configure
+        const { data, error } = await refreshQuery;
+        
+        if (error) {
+          console.error(`[subscribeCollection] Error refrescando ${tableName}:`, error);
+          return;
+        }
+
+        const normalized = normalizeData(tableName, data || []);
+        callback(normalized);
+      }
+    )
+    .subscribe();
+
   return () => {
-    if (unsubscribeFn) {
-      unsubscribeFn();
-    }
+    channel.unsubscribe();
   };
 }
 
@@ -483,29 +344,22 @@ export function normalizeSale(s) {
  * Reemplaza: firestoreUsers.getAllUsers()
  */
 export async function getAllUsers() {
-  // Siempre usar Supabase
   try {
-    const client = await getSupabaseClient();
-    if (!client || client._isDummy) {
-      console.error('❌ ERROR: Supabase no disponible. Por favor configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.');
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .order('nombre', { ascending: true });
+
+    if (error) {
+      console.error('[getAllUsers] Error:', error);
       return [];
     }
-      
-      const { data, error } = await client
-        .from('users')
-        .select('*')
-        .order('nombre', { ascending: true });
 
-      if (error) {
-        console.error('[getAllUsers] Error:', error);
-        return [];
-      }
-
-      return (data || []).map(u => normalizeUser({ id: u.id, ...u }));
-    } catch (err) {
-      console.error('[getAllUsers] Error fatal (Supabase):', err);
-      return [];
-    }
+    return (data || []).map(u => normalizeUser({ id: u.id, ...u }));
+  } catch (err) {
+    console.error('[getAllUsers] Error fatal:', err);
+    return [];
+  }
 }
 
 /**

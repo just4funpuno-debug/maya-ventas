@@ -1,5 +1,5 @@
 // Funciones para subir imágenes a Supabase Storage
-// Usado en todos los entornos (desarrollo y producción)
+// Solo se usa en localhost (desarrollo)
 
 import { supabase } from './supabaseClient';
 
@@ -149,69 +149,6 @@ export async function deleteImageFromSupabase(path) {
   } catch (error) {
     console.warn('[supabaseStorage] Error eliminando imagen:', error);
     return false;
-  }
-}
-
-/**
- * Sube una imagen de producto (compatible con API de Cloudinary)
- * Esta función mantiene la misma interfaz que uploadProductImage de Cloudinary
- * para facilitar la migración.
- * 
- * @param {File|string} file - Archivo a subir (File o base64 string)
- * @param {object} opts - Opciones: { folder, public_id }
- * @returns {Promise<{secure_url: string, public_id: string, url: string}>}
- */
-export async function uploadProductImage(file, opts = {}) {
-  try {
-    const { folder = 'productos' } = opts;
-    
-    // Determinar el bucket según el folder
-    let bucketName = 'product-images';
-    if (folder === 'comprobantes') {
-      bucketName = 'comprobantes';
-    } else if (folder === 'maya-productos' || folder === 'productos') {
-      bucketName = 'product-images';
-    }
-    
-    // Si es comprobante, usar la función específica
-    if (folder === 'comprobantes' && file instanceof File) {
-      const result = await uploadComprobanteToSupabase(file, folder);
-      return {
-        secure_url: result.url,
-        public_id: result.path,
-        url: result.url
-      };
-    }
-    
-    // Para imágenes de productos
-    const result = await uploadImageToSupabase(file, folder);
-    return {
-      secure_url: result.url,
-      public_id: result.path,
-      url: result.url
-    };
-  } catch (error) {
-    console.error('[supabaseStorage] Error en uploadProductImage:', error);
-    throw error;
-  }
-}
-
-/**
- * Elimina una imagen (compatible con API de Cloudinary)
- * @param {string} public_id - Path o public_id de la imagen
- * @returns {Promise<{ok: boolean, skipped?: boolean, error?: string}>}
- */
-export async function deleteProductImage(public_id) {
-  if (!public_id) {
-    return { skipped: true };
-  }
-  
-  try {
-    const success = await deleteImageFromSupabase(public_id);
-    return { ok: success };
-  } catch (error) {
-    console.warn('[supabaseStorage] Error en deleteProductImage:', error);
-    return { ok: false, error: error.message };
   }
 }
 

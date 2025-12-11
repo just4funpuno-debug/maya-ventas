@@ -14,12 +14,9 @@ import {
   sendAudioMessage, 
   sendDocumentMessage 
 } from './cloud-api-sender';
-import { sendTemplateMessage } from './template-sender';
 
 /**
  * Procesar mensaje de secuencia (enviar o agregar a cola)
- * FASE 4: SUBFASE 4.2 - Integración con templates
- * 
  * @param {string} contactId - ID del contacto
  * @param {Object} messageData - Datos del mensaje de secuencia
  * @param {string} messageData.message_type - Tipo de mensaje
@@ -27,7 +24,6 @@ import { sendTemplateMessage } from './template-sender';
  * @param {string} messageData.media_url - URL del media (si aplica)
  * @param {string} messageData.media_filename - Nombre del archivo (si aplica)
  * @param {string} messageData.caption - Caption (si aplica)
- * @param {string} messageData.template_id - ID del template (opcional, FASE 3.1)
  * @param {number} messageData.order_position - Posición en la secuencia
  * @returns {Promise<{success: boolean, method: string, messageId: string|null, queueId: string|null, error: Object|null}>}
  */
@@ -59,48 +55,6 @@ export async function processSequenceMessage(contactId, messageData) {
         queueId: null,
         error: { message: 'Contacto sin cuenta asociada' }
       };
-    }
-
-    // FASE 4.2: Si el mensaje tiene template_id, intentar usar template
-    if (messageData.template_id) {
-      // Verificar ventana 24h
-      const { data: windowData, error: windowError } = await supabase.rpc('calculate_window_24h', {
-        p_contact_id: contactId
-      });
-      
-      const windowResult = Array.isArray(windowData) ? windowData[0] : windowData;
-      const windowActive = windowResult?.window_active || false;
-      
-      // Verificar ventana 72h
-      const createdAt = new Date(contact.created_at);
-      const now = new Date();
-      const hoursSinceCreation = (now - createdAt) / (1000 * 60 * 60);
-      const isWithin72h = hoursSinceCreation < 72;
-      
-      // Si la ventana está cerrada, usar template (templates pueden enviarse fuera de ventana)
-      if (!windowActive && !isWithin72h) {
-        console.log('[processSequenceMessage] Ventana cerrada, usando template:', messageData.template_id);
-        const result = await sendTemplateMessage(accountId, contactId, messageData.template_id);
-        
-        if (result.success) {
-          // Actualizar contadores y posición
-          await updateContactAfterSend(contactId, 'template', messageData.order_position);
-          
-          return {
-            success: true,
-            method: 'template',
-            messageId: result.messageId,
-            queueId: null,
-            whatsappMessageId: result.whatsappMessageId,
-            error: null
-          };
-        } else {
-          console.warn('[processSequenceMessage] Error enviando template, continuando con flujo normal:', result.error);
-          // Continuar con flujo normal si falla el template
-        }
-      }
-      // Si la ventana está abierta, continuar con el flujo normal
-      // (aunque tenga template, puede preferirse enviar mensaje normal dentro de ventana)
     }
 
     // Decidir método de envío

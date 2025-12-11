@@ -4,26 +4,16 @@
  */
 
 /**
- * Generar state único para OAuth (UUID) con información del frontend
- * @returns {string} State codificado con UUID y frontend URL
+ * Generar state único para OAuth (UUID)
+ * @returns {string} UUID v4
  */
 export function generateOAuthState() {
   // Generar UUID v4 simple
-  const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
-  
-  // Incluir URL del frontend en el state para que la Edge Function pueda redirigir correctamente
-  const frontendOrigin = window.location.origin;
-  const stateData = {
-    uuid: uuid,
-    frontend: frontendOrigin
-  };
-  
-  // Codificar en base64 para incluirlo en el state
-  return btoa(JSON.stringify(stateData));
 }
 
 /**
@@ -83,7 +73,7 @@ export function saveOAuthState(state) {
 
 /**
  * Validar state desde localStorage
- * @param {string} receivedState - State recibido del callback (puede ser UUID o state codificado)
+ * @param {string} receivedState - State recibido del callback
  * @returns {boolean} true si el state es válido
  */
 export function validateOAuthState(receivedState) {
@@ -103,29 +93,8 @@ export function validateOAuthState(receivedState) {
       return false;
     }
 
-    // El state guardado puede ser el objeto completo codificado
-    // El receivedState también puede ser el objeto completo o solo el UUID
-    // Intentar comparar directamente primero
-    if (savedState === receivedState) {
-      return true;
-    }
-    
-    // Si no coincide, intentar decodificar ambos para comparar el UUID
-    try {
-      const savedData = JSON.parse(atob(savedState));
-      const receivedData = JSON.parse(atob(receivedState));
-      
-      // Comparar el UUID dentro del objeto
-      if (savedData.uuid && receivedData.uuid) {
-        return savedData.uuid === receivedData.uuid;
-      }
-      
-      // Si no tienen estructura esperada, comparar directamente
-      return savedState === receivedState;
-    } catch {
-      // Si no se puede decodificar, comparar directamente
-      return savedState === receivedState;
-    }
+    // Verificar que coincida
+    return savedState === receivedState;
   } catch (err) {
     console.error('[OAuth] Error validando state:', err);
     return false;
@@ -187,14 +156,7 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
   }
 
   // Escuchar mensaje desde popup (el popup envía mensaje después de procesar el hash)
-  let messageReceived = false;
   const messageHandler = (event) => {
-    console.log('[OAuth] Mensaje recibido:', {
-      origin: event.origin,
-      data: event.data,
-      popupClosed: popup.closed
-    });
-    
     // Verificar origen (debe ser desde el mismo origen o Supabase)
     const currentOrigin = window.location.origin;
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
@@ -207,14 +169,15 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
       return;
     }
 
+    // Verificar que el popup aún existe
+    if (popup.closed) {
+      window.removeEventListener('message', messageHandler);
+      return;
+    }
+
     // Procesar mensaje
     if (event.data && event.data.type === 'whatsapp_oauth_callback') {
-      messageReceived = true;
-      clearInterval(checkInterval);
-      clearInterval(hashCheckInterval);
       window.removeEventListener('message', messageHandler);
-      
-      console.log('[OAuth] Callback procesado:', event.data);
       
       if (event.data.success) {
         onSuccess(event.data.data);
@@ -227,25 +190,11 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
   window.addEventListener('message', messageHandler);
 
   // También verificar si el popup se cerró manualmente
-  // Esperar más tiempo antes de considerar que fue cancelado (puede tardar en redirigir)
-  let popupClosedChecks = 0;
-  const maxClosedChecks = 30; // Esperar hasta 30 segundos antes de considerar cancelado (aumentado de 10)
   const checkInterval = setInterval(() => {
-    if (popup.closed && !messageReceived) {
-      popupClosedChecks++;
-      console.log(`[OAuth] Popup cerrado, checks: ${popupClosedChecks}/${maxClosedChecks}`);
-      // Solo considerar cancelado si se cerró y no hemos recibido ningún mensaje
-      // Dar tiempo suficiente para que la redirección y el mensaje lleguen
-      if (popupClosedChecks >= maxClosedChecks) {
-        console.error('[OAuth] Timeout: Popup cerrado sin recibir mensaje');
-        clearInterval(checkInterval);
-        clearInterval(hashCheckInterval);
-        window.removeEventListener('message', messageHandler);
-        onError({ message: 'OAuth cancelado por el usuario o timeout' });
-      }
-    } else if (!popup.closed) {
-      // Resetear contador si el popup sigue abierto
-      popupClosedChecks = 0;
+    if (popup.closed) {
+      clearInterval(checkInterval);
+      window.removeEventListener('message', messageHandler);
+      onError({ message: 'OAuth cancelado por el usuario' });
     }
   }, 1000);
 

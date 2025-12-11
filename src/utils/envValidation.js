@@ -13,17 +13,17 @@ import { error } from './logger';
 
 /**
  * Variables de entorno requeridas
- * Supabase es requerido en todos los entornos (desarrollo y producción)
  */
 const REQUIRED_ENV_VARS = {
-  // Supabase requerido siempre
+  VITE_SUPABASE_URL: 'URL de Supabase (ej: https://xxx.supabase.co)',
+  VITE_SUPABASE_ANON_KEY: 'Clave anónima de Supabase'
 };
 
 /**
  * Variables de entorno opcionales (con valores por defecto)
  */
 const OPTIONAL_ENV_VARS = {
-  // No hay variables opcionales por ahora
+  VITE_CLOUDINARY_SIGNATURE_URL: '/api/cloudinary-signature'
 };
 
 /**
@@ -48,21 +48,7 @@ export function validateEnv() {
   const missing = [];
   const errors = [];
   
-  // Supabase es requerido en TODOS los entornos (desarrollo y producción)
-  const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-  const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
-  
-  if (!supabaseUrl || !supabaseKey) {
-    missing.push('VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY');
-    errors.push(`❌ VITE_SUPABASE_URL no está configurada. URL de Supabase (ej: https://xxx.supabase.co)`);
-    errors.push(`❌ VITE_SUPABASE_ANON_KEY no está configurada. Clave anónima de Supabase`);
-    
-    if (isProd()) {
-      errors.push(`⚠️  En producción (Vercel), asegúrate de configurar estas variables en el dashboard de Vercel`);
-    }
-  }
-  
-  // Validar variables requeridas adicionales (si las hay)
+  // Validar variables requeridas
   for (const [varName, description] of Object.entries(REQUIRED_ENV_VARS)) {
     const value = getEnvVar(varName);
     
@@ -127,7 +113,7 @@ export function validateEnv() {
   }
   
   // Validar formato de variables (opcional, pero útil)
-  // Reutilizar la variable ya declarada arriba
+  const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
   if (supabaseUrl && !supabaseUrl.startsWith('http')) {
     errors.push(`⚠️  VITE_SUPABASE_URL parece tener un formato incorrecto: ${supabaseUrl}`);
   }

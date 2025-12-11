@@ -1,7 +1,6 @@
 /**
  * Servicio para decidir método de envío (Cloud API vs Puppeteer)
  * FASE 2: Lógica de Decisión Inteligente
- * FASE 4: SUBFASE 4.2 - Lógica automática (ventana cerrada → template)
  * 
  * Decide automáticamente si usar Cloud API (gratis) o Puppeteer (gratis)
  * basado en ventana 72h y ventana 24h
@@ -9,72 +8,6 @@
 
 import { supabase } from '../../supabaseClient';
 import { sendTextMessage, sendImageMessage, sendVideoMessage, sendAudioMessage, sendDocumentMessage } from './cloud-api-sender';
-import { sendTemplateMessage } from './template-sender';
-
-/**
- * Verificar si la ventana 24h está activa para un contacto
- * Helper para FASE 4.2
- * @param {string} contactId - ID del contacto
- * @returns {Promise<{isActive: boolean, expiresAt: string|null, error: Object|null}>}
- */
-async function checkWindow24h(contactId) {
-  try {
-    const { data, error } = await supabase.rpc('calculate_window_24h', {
-      p_contact_id: contactId
-    });
-    
-    if (error) {
-      console.error('[checkWindow24h] Error:', error);
-      return { isActive: false, expiresAt: null, error };
-    }
-    
-    const result = Array.isArray(data) ? data[0] : data;
-    
-    return {
-      isActive: result?.window_active || false,
-      expiresAt: result?.window_expires_at || null,
-      error: null
-    };
-  } catch (err) {
-    console.error('[checkWindow24h] Error fatal:', err);
-    return { isActive: false, expiresAt: null, error: err };
-  }
-}
-
-/**
- * Verificar si el contacto tiene menos de 72 horas desde creación
- * Helper para FASE 4.2
- * @param {string} contactId - ID del contacto
- * @returns {Promise<{isWithin72h: boolean, hoursSinceCreation: number, error: Object|null}>}
- */
-async function check72hWindow(contactId) {
-  try {
-    const { data, error } = await supabase
-      .from('whatsapp_contacts')
-      .select('created_at')
-      .eq('id', contactId)
-      .single();
-    
-    if (error) {
-      console.error('[check72hWindow] Error:', error);
-      return { isWithin72h: false, hoursSinceCreation: null, error };
-    }
-    
-    if (!data || !data.created_at) {
-      return { isWithin72h: false, hoursSinceCreation: null, error: { message: 'Contacto no encontrado' } };
-    }
-    
-    const createdAt = new Date(data.created_at);
-    const now = new Date();
-    const hoursSinceCreation = (now - createdAt) / (1000 * 60 * 60);
-    const isWithin72h = hoursSinceCreation < 72;
-    
-    return { isWithin72h, hoursSinceCreation, error: null };
-  } catch (err) {
-    console.error('[check72hWindow] Error fatal:', err);
-    return { isWithin72h: false, hoursSinceCreation: null, error: err };
-  }
-}
 
 /**
  * Decidir método de envío para un contacto
@@ -184,47 +117,15 @@ export async function addToPuppeteerQueue(contactId, messageType, messageData) {
 
 /**
  * Enviar mensaje inteligente (decide automáticamente Cloud API vs Puppeteer)
- * FASE 4: SUBFASE 4.2 - Lógica automática (ventana cerrada → template)
- * 
  * @param {string} accountId - ID de la cuenta WhatsApp
  * @param {string} contactId - ID del contacto
- * @param {string} messageType - Tipo de mensaje: 'text', 'image', 'video', 'audio', 'document', 'template'
+ * @param {string} messageType - Tipo de mensaje: 'text', 'image', 'video', 'audio', 'document'
  * @param {Object} messageData - Datos del mensaje
- * @param {string} messageData.template_id - ID del template (opcional, para usar templates)
  * @param {Object} options - Opciones adicionales (forceMethod, skipValidation, etc.)
  * @returns {Promise<{success: boolean, method: string, messageId: string|null, queueId: string|null, error: Object|null}>}
  */
 export async function sendMessageIntelligent(accountId, contactId, messageType, messageData, options = {}) {
   try {
-    // FASE 4.2: Si el mensaje tiene template_id, intentar usar template primero
-    if (messageData?.template_id) {
-      // Verificar ventana 24h para decidir si usar template
-      const { isActive: windowActive } = await checkWindow24h(contactId);
-      const { isWithin72h } = await check72hWindow(contactId);
-      
-      // Si la ventana está cerrada, usar template (los templates pueden enviarse fuera de ventana 24h)
-      if (!windowActive && !isWithin72h) {
-        console.log('[sendMessageIntelligent] Ventana cerrada, usando template:', messageData.template_id);
-        const result = await sendTemplateMessage(accountId, contactId, messageData.template_id, options);
-        
-        if (result.success) {
-          return {
-            success: true,
-            method: 'template',
-            messageId: result.messageId,
-            queueId: null,
-            whatsappMessageId: result.whatsappMessageId,
-            error: null
-          };
-        } else {
-          // Si falla el template, continuar con el flujo normal
-          console.warn('[sendMessageIntelligent] Error enviando template, continuando con flujo normal:', result.error);
-        }
-      }
-      // Si la ventana está abierta, continuar con el flujo normal
-      // (el usuario puede preferir enviar mensaje normal aunque tenga template configurado)
-    }
-
     // Si se fuerza un método, usarlo directamente
     if (options.forceMethod === 'cloud_api') {
       return await sendViaCloudAPI(accountId, contactId, messageType, messageData, options);

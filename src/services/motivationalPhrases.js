@@ -248,13 +248,13 @@ export async function getNextPhraseForUser(userId) {
 /**
  * Registrar que un usuario vio un saludo hoy
  * @param {string} userId - ID del usuario
- * @param {Date|null} greetingDate - Fecha del saludo (opcional, usa hoy si no se proporciona)
  * @param {string} phraseId - ID de la frase mostrada
  * @param {string} phraseText - Texto de la frase
  * @param {string} saludoType - Tipo de saludo ('Buenos días', 'Buenas tardes', 'Buenas noches')
+ * @param {Date|null} greetingDate - Fecha del saludo (opcional, usa hoy si no se proporciona)
  * @returns {Promise<{data: string|null, error: Object|null}>}
  */
-export async function logUserGreeting(userId, greetingDate = null, phraseId, phraseText, saludoType) {
+export async function logUserGreeting(userId, phraseId, phraseText, saludoType, greetingDate = null) {
   try {
     const dateParam = greetingDate 
       ? greetingDate.toISOString().split('T')[0] // YYYY-MM-DD

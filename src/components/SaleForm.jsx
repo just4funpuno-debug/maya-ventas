@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AsyncButton } from "./AsyncButton.jsx";
 import { ShoppingCart, MessageCircle } from "lucide-react";
 import { todayISO } from "../App.jsx"; // si todayISO no es exportado, mover helper a util común y ajustar import
+import { uploadProductImage } from "../cloudinary";
 import { uploadComprobanteToSupabase } from "../supabaseStorage";
 import { compressImage } from "../utils/imageCompression";
 import { useToast } from "./ToastProvider.jsx";
@@ -20,23 +21,8 @@ export default function SaleForm({ products, session, onSubmit, initialSku, fixe
   const [ciudadVenta, setCiudadVenta] = useState(fixedCity || ciudades[0]);
   const visibleProducts = useMemo(()=>{
     const assigned = session.productos || [];
-    // Debug: Log para diagnosticar problema en Vercel
-    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
-      console.log('[SaleForm] Debug productos:', {
-        userId: session?.id,
-        rol: session?.rol,
-        productosAssigned: assigned,
-        productosLength: assigned.length,
-        allProductsCount: products.length,
-        isAdmin: session?.rol === 'admin'
-      });
-    }
     if (session.rol === 'admin' || assigned.length === 0) return products;
-    const filtered = products.filter(p => assigned.includes(p.sku));
-    if (typeof window !== 'undefined' && import.meta.env?.PROD) {
-      console.log('[SaleForm] Productos filtrados:', filtered.length);
-    }
-    return filtered;
+    return products.filter(p => assigned.includes(p.sku));
   }, [products, session]);
 
   const [sku, setSku] = useState(initialSku || (visibleProducts[0] ? visibleProducts[0].sku : ""));
@@ -113,9 +99,18 @@ export default function SaleForm({ products, session, onSubmit, initialSku, fixe
     let comprobanteCloudUrl = null;
     if (comprobanteFile) {
       try {
-        // Usar Supabase Storage en todos los entornos
-        const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
-        comprobanteCloudUrl = result.url || result.secure_url;
+        // Detectar entorno: localhost usa Supabase Storage, Vercel usa Cloudinary
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        if (isLocalhost) {
+          // Subir a Supabase Storage en localhost
+          const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
+          comprobanteCloudUrl = result.url || result.secure_url;
+        } else {
+          // Subir a Cloudinary en Vercel
+          const result = await uploadProductImage(comprobanteFile, { folder: 'comprobantes' });
+          comprobanteCloudUrl = result.secure_url;
+        }
         setComprobanteUrl(comprobanteCloudUrl);
       } catch (err) {
         toast.push({ type: 'error', title: 'Error', message: 'Error al subir comprobante: ' + err.message });
@@ -359,7 +354,9 @@ export default function SaleForm({ products, session, onSubmit, initialSku, fixe
                   }} className="text-xs" />
                   <div className="text-[10px] text-neutral-500">
                     Sube comprobante (máx 2MB). 
-                    Se sube a Supabase Storage.}
+                    {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+                      ? ' Se sube a Supabase Storage.' 
+                      : ' Se sube a Cloudinary.'}
                   </div>
                   {comprobanteFile && <div className="text-[10px] text-green-400">Comprobante listo para subir</div>}
                   {comprobanteUrl && <div className="text-[10px] text-blue-400">Subido: <a href={comprobanteUrl} target="_blank" rel="noopener noreferrer">ver archivo</a></div>}

@@ -20,9 +20,7 @@ export default function QRModal({
   phoneNumber = '',
   isChecking = false,
   status = 'pending',
-  onStatusChange = null,
-  metaAppId = null,
-  onOpenVerificationCodeModal = null // Nueva prop para abrir modal de verificación de código manualmente
+  onStatusChange = null
 }) {
   const [timeRemaining, setTimeRemaining] = useState(300); // 5 minutos en segundos
   const [hasTimedOut, setHasTimedOut] = useState(false);
@@ -87,9 +85,7 @@ export default function QRModal({
     if (isChecking) {
       return 'Verificando coexistencia...';
     }
-    return qrUrl 
-      ? 'Escanea el código QR con WhatsApp para activar la coexistencia.'
-      : 'Revisa tu WhatsApp Business para recibir el código de verificación.';
+    return 'Escanea el código QR con WhatsApp para activar la coexistencia.';
   };
 
   return (
@@ -172,86 +168,14 @@ export default function QRModal({
 
         {/* Instructions */}
         {status === 'pending' && !hasTimedOut && !isChecking && (
-          <div className="mb-4 text-xs text-neutral-400 space-y-2">
-            {!qrUrl ? (
-              <>
-                <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3">
-                  <p className="font-medium text-blue-200 mb-2">Código de verificación en WhatsApp Business</p>
-                  <p className="text-blue-300/80 mb-3">
-                    Meta enviará un <strong>código numérico de 6 dígitos</strong> directamente al WhatsApp Business de este número. 
-                    El código llegará como un mensaje de Meta.
-                  </p>
-                  
-                  <div className="mb-3 p-2 bg-yellow-900/20 border border-yellow-700/50 rounded text-xs text-yellow-200">
-                    <strong>⚠️ Si no recibes el código:</strong> Ve primero a Meta Developer Console (enlace abajo), 
-                    busca tu número y haz clic en "Use existing number" para iniciar el proceso de verificación.
-                  </div>
-                  
-                  <ol className="list-decimal list-inside space-y-1.5 text-blue-300/90 ml-2">
-                    <li>Abre <strong>WhatsApp Business</strong> en tu teléfono (del número {phoneNumber})</li>
-                    <li>Busca el <strong>mensaje de Meta</strong> con el código de verificación</li>
-                    <li>Copia el <strong>código numérico</strong> (6 dígitos, ejemplo: 123456)</li>
-                    <li>Haz clic en el botón naranja abajo para ingresar el código aquí</li>
-                  </ol>
-                  <div className="mt-3 p-2 bg-blue-950/30 border border-blue-600/30 rounded text-xs text-blue-200">
-                    <strong>Nota:</strong> El código puede tardar unos minutos en llegar. Asegúrate de que tu WhatsApp Business esté activo y conectado a internet.
-                  </div>
-                </div>
-                <div className="bg-neutral-800/50 border border-neutral-700 rounded-lg p-3">
-                  <p className="font-medium text-neutral-300 mb-2">Ingresar código de verificación</p>
-                  
-                  {/* Botón para abrir modal de verificación de código */}
-                  {onOpenVerificationCodeModal && (
-                    <>
-                      <p className="text-xs text-neutral-400 mb-3">
-                        Si recibiste el código de 6 dígitos en WhatsApp Business, ingrésalo aquí:
-                      </p>
-                      <button
-                        onClick={onOpenVerificationCodeModal}
-                        className="w-full mb-3 px-4 py-2 bg-[#e7922b] hover:bg-[#d6831f] text-[#1a2430] rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
-                      >
-                        <span>🔑</span>
-                        Ingresar Código de 6 Dígitos Aquí
-                      </button>
-                    </>
-                  )}
-                  
-                  <p className="text-xs text-neutral-400 mb-2 mt-3 border-t border-neutral-700 pt-3">
-                    <strong>O</strong> si aún no recibes el código, ve a Meta Developer Console para iniciar el proceso manualmente:
-                  </p>
-                  <a
-                    href={`https://developers.facebook.com/apps/${metaAppId || import.meta.env.VITE_META_APP_ID || ''}/whatsapp-business/wa-dev-console/phone-numbers`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 underline text-xs mb-2"
-                  >
-                    Abrir Meta Developer Console - Phone Numbers
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
-                  <div className="text-xs text-neutral-400 space-y-1 mt-2 pl-2 border-l-2 border-neutral-700">
-                    <p className="font-medium text-neutral-300">Pasos en Meta Developer Console:</p>
-                    <ol className="list-decimal list-inside space-y-1 ml-1">
-                      <li>En el menú lateral, ve a <strong>"Phone Numbers"</strong></li>
-                      <li>Busca tu número <strong>{phoneNumber}</strong> en la lista</li>
-                      <li>Si no está, haz clic en <strong>"Add phone number"</strong> → <strong>"Use existing number"</strong></li>
-                      <li>Ingresa el código que recibiste en WhatsApp Business</li>
-                    </ol>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="font-medium text-neutral-300 mb-2">Instrucciones:</p>
-                <ol className="list-decimal list-inside space-y-1 ml-2">
-                  <li>Abre WhatsApp Business en tu teléfono</li>
-                  <li>Ve a Configuración → Dispositivos vinculados</li>
-                  <li>Escanea este código QR</li>
-                  <li>Espera a que se verifique automáticamente</li>
-                </ol>
-              </>
-            )}
+          <div className="mb-4 text-xs text-neutral-400 space-y-1">
+            <p className="font-medium text-neutral-300 mb-2">Instrucciones:</p>
+            <ol className="list-decimal list-inside space-y-1 ml-2">
+              <li>Abre WhatsApp en tu teléfono</li>
+              <li>Ve a Configuración → Dispositivos vinculados</li>
+              <li>Escanee este código QR</li>
+              <li>Espera a que se verifique automáticamente</li>
+            </ol>
           </div>
         )}
 
@@ -286,20 +210,13 @@ export default function QRModal({
               )}
             </>
           ) : (
-            <>
-              <button
-                onClick={onClose}
-                className="px-3 py-2 rounded-xl bg-neutral-700 text-xs text-neutral-200 hover:bg-neutral-600"
-              >
-                Continuar sin esperar
-              </button>
-              {isChecking && (
-                <div className="flex items-center gap-2 text-xs text-neutral-400">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Verificando...
-                </div>
-              )}
-            </>
+            <button
+              onClick={onClose}
+              disabled={isChecking}
+              className="px-3 py-2 rounded-xl bg-neutral-700 text-xs text-neutral-200 hover:bg-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {isChecking ? 'Verificando...' : 'Cancelar'}
+            </button>
           )}
         </div>
       </div>

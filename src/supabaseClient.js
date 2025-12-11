@@ -3,16 +3,9 @@
  * Fase 7.1: Cliente Supabase para reemplazar Firebase
  * 
  * Configuración del cliente Supabase con variables de entorno
- * En producción, si no hay Supabase configurado, crea un cliente dummy
- * (la aplicación debería usar Firebase en ese caso)
  */
 
 import { createClient } from '@supabase/supabase-js';
-
-// Detectar entorno - verificar tanto PROD como Vercel deployment
-const isProduction = typeof import.meta !== 'undefined' && import.meta.env 
-  ? (import.meta.env.PROD === true || import.meta.env.MODE === 'production')
-  : (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1');
 
 // Variables de entorno (compatible con Vite y Node.js)
 const supabaseUrl = typeof import.meta !== 'undefined' && import.meta.env 
@@ -22,169 +15,28 @@ const supabaseAnonKey = typeof import.meta !== 'undefined' && import.meta.env
   ? import.meta.env.VITE_SUPABASE_ANON_KEY 
   : process.env.VITE_SUPABASE_ANON_KEY;
 
-// Log para debugging (solo en producción)
-if (typeof window !== 'undefined' && (import.meta.env?.PROD || import.meta.env?.MODE === 'production')) {
-  if (supabaseUrl) {
-    console.log('🔍 [Supabase Client] URL detectada:', supabaseUrl.replace(/https?:\/\//, '').split('.')[0] + '.***');
-  } else {
-    console.error('❌ [Supabase Client] VITE_SUPABASE_URL no está definida');
-  }
-}
-
-// Crear cliente Supabase según disponibilidad
-let supabaseClient;
-
+// Nota: La validación completa de variables de entorno se hace en main.jsx
+// Aquí solo validamos que existan antes de crear el cliente
 if (!supabaseUrl || !supabaseAnonKey) {
-  if (isProduction) {
-    // En producción sin Supabase: crear cliente dummy que no intente conexiones reales
-    console.error('❌ ERROR: Variables de Supabase no configuradas en producción.');
-    console.error('   Por favor configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en el dashboard de Vercel.');
-    
-    // Crear cliente dummy completo que NO intenta conexiones reales
-    // Este mock debe cubrir todos los métodos encadenados posibles
-    const createDummyQuery = () => {
-      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
-      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
-      
-      // Objeto que retorna a sí mismo para permitir encadenamiento infinito
-      const chainable = () => chainableObj;
-      const chainableObj = {
-        eq: chainable,
-        in: chainable,
-        is: chainable,
-        neq: chainable,
-        gt: chainable,
-        gte: chainable,
-        lt: chainable,
-        lte: chainable,
-        like: chainable,
-        ilike: chainable,
-        contains: chainable,
-        order: chainable,
-        limit: chainable,
-        range: chainable,
-        select: chainable,
-        maybeSingle: () => dummySingle,
-        single: () => dummySingle,
-        then: (callback) => {
-          dummyResult.then(result => callback(result));
-          return dummyResult;
-        }
-      };
-      
-      return chainableObj;
-    };
-    
-    supabaseClient = {
-      from: (table) => {
-        // Silenciar llamadas a Supabase en producción sin config
-        if (typeof console !== 'undefined' && console.warn) {
-          // Solo loguear una vez por tabla para no saturar la consola
-          if (!supabaseClient._warnedTables) {
-            supabaseClient._warnedTables = new Set();
-          }
-          if (!supabaseClient._warnedTables.has(table)) {
-            console.warn(`[Supabase Dummy] Llamada a tabla '${table}' ignorada - usar Firebase en producción`);
-            supabaseClient._warnedTables.add(table);
-          }
-        }
-        
-        return {
-          select: (columns) => createDummyQuery(),
-          insert: (data) => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }),
-          update: (data) => ({
-            eq: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }),
-            in: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } })
-          }),
-          delete: () => ({
-            eq: () => Promise.resolve({ error: { message: 'Supabase no disponible - usar Firebase' } }),
-            in: () => Promise.resolve({ error: { message: 'Supabase no disponible - usar Firebase' } })
-          }),
-          upsert: (data) => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } })
-        };
-      },
-      channel: (name) => {
-        // Canal dummy que no intenta conexiones WebSocket
-        return {
-          on: () => ({
-            subscribe: () => ({ unsubscribe: () => {} })
-          }),
-          subscribe: () => ({ unsubscribe: () => {} })
-        };
-      },
-      rpc: (func, params) => Promise.resolve({ data: null, error: { message: 'RPC no disponible - usar Firebase' } }),
-      auth: {
-        signInWithPassword: () => Promise.resolve({ data: null, error: { message: 'Usar authProvider para autenticación' } }),
-        signOut: () => Promise.resolve({ error: null }),
-        getUser: () => Promise.resolve({ data: { user: null }, error: null }),
-        getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-        onAuthStateChange: () => ({ unsubscribe: () => {} })
-      },
-      _isDummy: true // Flag para identificar que es un cliente dummy
-    };
-  } else {
-    // En desarrollo: lanzar error
-    const error = new Error('Supabase no configurado. Verifica las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
-    console.error('❌ Variables de entorno de Supabase no configuradas');
-    console.error('   Necesitas: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
-    throw error;
-  }
-} else {
-  // Validar que la URL sea válida antes de crear el cliente
-  const isValidUrl = supabaseUrl && (
-    supabaseUrl.startsWith('https://') || 
-    supabaseUrl.startsWith('http://')
-  );
-  
-  // Si estamos en producción y la URL parece inválida, usar dummy
-  // Ya no validamos URLs específicas, solo si existe
-  if (isProduction && !isValidUrl) {
-    console.error('❌ ERROR: URL de Supabase inválida en producción. Por favor configura VITE_SUPABASE_URL en Vercel.');
-    // Reutilizar la lógica del dummy
-    const createDummyQuery = () => {
-      const dummyResult = Promise.resolve({ data: [], error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
-      const dummySingle = Promise.resolve({ data: null, error: { message: 'Supabase no configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.' } });
-      const chainable = () => chainableObj;
-      const chainableObj = {
-        eq: chainable, in: chainable, is: chainable, neq: chainable, gt: chainable, gte: chainable,
-        lt: chainable, lte: chainable, like: chainable, ilike: chainable, contains: chainable,
-        order: chainable, limit: chainable, range: chainable, select: chainable,
-        maybeSingle: () => dummySingle, single: () => dummySingle,
-        then: (callback) => { dummyResult.then(result => callback(result)); return dummyResult; }
-      };
-      return chainableObj;
-    };
-    supabaseClient = {
-      from: () => ({
-        select: () => createDummyQuery(),
-        insert: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }),
-        update: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } }) }),
-        delete: () => ({ eq: () => Promise.resolve({ error: { message: 'Supabase no disponible - usar Firebase' } }) }),
-        upsert: () => Promise.resolve({ data: null, error: { message: 'Supabase no disponible - usar Firebase' } })
-      }),
-      channel: () => ({ on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }), subscribe: () => ({ unsubscribe: () => {} }) }),
-      rpc: () => Promise.resolve({ data: null, error: { message: 'RPC no disponible - usar Firebase' } }),
-      auth: { signInWithPassword: () => Promise.resolve({ data: null, error: { message: 'Usar authProvider' } }) },
-      _isDummy: true
-    };
-  } else {
-    // Crear cliente Supabase normal
-    supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true
-      },
-      realtime: {
-        params: {
-          eventsPerSecond: 10
-        }
-      }
-    });
-  }
+  const error = new Error('Supabase no configurado. Verifica las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
+  console.error('❌ Variables de entorno de Supabase no configuradas');
+  console.error('   Necesitas: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
+  throw error;
 }
 
-export const supabase = supabaseClient;
+// Crear cliente Supabase
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10
+    }
+  }
+});
 
 /**
  * Helper: Verificar conexión a Supabase

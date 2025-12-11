@@ -90,10 +90,10 @@ BEGIN
     v_remaining := '[]'::jsonb;
   END IF;
   
-  -- Obtener el texto de la frase (calificar con nombre de tabla para evitar ambigüedad)
-  SELECT motivational_phrases.phrase_text INTO v_phrase_text
+  -- Obtener el texto de la frase
+  SELECT phrase_text INTO v_phrase_text
   FROM motivational_phrases
-  WHERE motivational_phrases.id = v_phrase_id;
+  WHERE id = v_phrase_id;
   
   -- Actualizar el pool con las frases restantes (nunca NULL)
   UPDATE user_phrase_pool

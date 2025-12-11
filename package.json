@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "concurrently \"npm run dev\" \"node scripts/cloudinary-signature-server.cjs\"",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -44,8 +45,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.86.0",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "firebase": "^12.2.1",
+    "firebase-admin": "^13.5.0",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.453.0",
     "node-fetch": "^3.3.2",
