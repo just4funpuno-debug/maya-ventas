@@ -5,6 +5,10 @@ console.log('[vite.config] Configuración cargada - 100% Supabase');
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    host: true, // Permitir conexiones desde la red local (para probar en móvil)
+    port: 5173
+  },
   build: {
     rollupOptions: {
       output: {

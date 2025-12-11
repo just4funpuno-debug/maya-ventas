@@ -553,7 +553,86 @@ function App() {
     } catch(err){ warn('No se pudo suscribir a ventasporcobrar para KPI Por Cobrar', err); }
   }, []);
   const [session, setSession] = useState(() => loadLS(LS_KEYS.session, null));
+  // Estado para trackear si Supabase tiene sesión activa (importante para móviles)
+  const [supabaseReady, setSupabaseReady] = useState(false);
   const [dispatches, setDispatches] = useState(() => loadLS(LS_KEYS.warehouseDispatches, []).map(d=> ({ ...d, status: d.status || 'confirmado' })));
+  
+  // Verificar/restaurar sesión de Supabase cuando hay session en localStorage
+  // Nota: En móviles, puede ser necesario hacer logout/login una vez para sincronizar las sesiones
+  useEffect(() => {
+    if (!session) {
+      setSupabaseReady(false);
+      return;
+    }
+    
+    let mounted = true;
+    let authUnsub = null;
+    
+    const checkSession = async () => {
+      try {
+        const { supabase } = await import('./supabaseClient');
+        if (!supabase || supabase._isDummy) {
+          setSupabaseReady(false);
+          return;
+        }
+        
+        // Verificar si Supabase tiene sesión activa
+        const { data: authSession } = await supabase.auth.getSession();
+        
+        if (authSession?.session) {
+          setSupabaseReady(true);
+          return;
+        }
+        
+        // Escuchar cambios en el estado de autenticación
+        authUnsub = supabase.auth.onAuthStateChange((event, session) => {
+          if (!mounted) return;
+          
+          if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+            setSupabaseReady(true);
+            if (authUnsub) {
+              authUnsub.data.subscription.unsubscribe();
+              authUnsub = null;
+            }
+          } else if (event === 'SIGNED_OUT') {
+            setSupabaseReady(false);
+          }
+        });
+        
+        // Verificación después de 1 segundo como fallback
+        setTimeout(async () => {
+          if (mounted && !supabaseReady) {
+            const { data: checkSession } = await supabase.auth.getSession();
+            if (checkSession?.session) {
+              setSupabaseReady(true);
+            }
+            if (authUnsub) {
+              authUnsub.data.subscription.unsubscribe();
+              authUnsub = null;
+            }
+          }
+        }, 1000);
+        
+      } catch (error) {
+        console.error('[App] Error verificando sesión de Supabase:', error);
+        setSupabaseReady(false);
+      }
+    };
+    
+    checkSession();
+    
+    return () => {
+      mounted = false;
+      if (authUnsub) {
+        try {
+          authUnsub.data.subscription.unsubscribe();
+        } catch (e) {
+          // Ignorar errores al limpiar
+        }
+      }
+    };
+  }, [session]);
+  
   // Estado para "Mis Números"
   const [numbers, setNumbers] = useState(()=> loadLS(LS_KEYS.numeros, [])); // [{id, sku, telefonia, nombreOtro, celular, caduca, createdAt}]
   // Suscripción en tiempo real a la tabla 'mis_numeros' (mapeada desde 'numbers' en supabaseUsers.js)
@@ -1133,188 +1212,43 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sincroniza productos en tiempo real desde Firestore (colección almacenCentral)
-  // IMPORTANTE: Esperar a que haya sesión Y que Supabase esté autenticado para evitar problemas de RLS
-  // Mejorado para móviles: usa onAuthStateChange para esperar a que Supabase esté listo
+  // Sincroniza productos en tiempo real desde almacenCentral
+  // Esperar a que haya sesión y Supabase esté listo antes de suscribirse
   useEffect(() => {
-    // No suscribirse si no hay sesión (el usuario aún no está autenticado)
     if (!session) {
-      console.log('[App] ⏸️ No hay sesión aún, esperando para suscribirse a productos...');
       setProducts([]);
       setProductsLoaded(false);
       return;
     }
     
+    // Esperar a que Supabase esté listo
+    if (!supabaseReady) {
+      return;
+    }
+    
     let mounted = true;
     let unsubFn = null;
-    let authUnsubFn = null;
-    let retryCount = 0;
-    const MAX_RETRIES = 10; // Máximo 10 reintentos (hasta 5 segundos en total)
     
-    // Función para iniciar suscripción después de verificar autenticación
-    const startSubscription = async () => {
+    const unsub = subscribeCollection('almacenCentral', (newProducts) => {
       if (!mounted) return;
       
-      try {
-        const { supabase } = await import('./supabaseClient');
-        if (!supabase || supabase._isDummy) {
-          console.warn('[App] ⚠️ Supabase no disponible, suscribiéndose de todos modos...');
-          // Continuar aunque sea dummy (puede funcionar en algunos casos)
-        } else {
-          // Verificar que Supabase tenga sesión activa
-          const { data: authSession, error: authError } = await supabase.auth.getSession();
-          
-          if (authError) {
-            console.warn('[App] ⚠️ Error verificando sesión de Supabase:', authError);
-            // Continuar de todos modos
-          } else if (!authSession?.session) {
-            // No hay sesión aún, esperar usando onAuthStateChange
-            console.log('[App] ⏸️ Supabase aún no tiene sesión activa, esperando con onAuthStateChange... (intento:', retryCount + 1, '/', MAX_RETRIES, ')');
-            
-            if (retryCount < MAX_RETRIES) {
-              retryCount++;
-              
-              // Usar onAuthStateChange para esperar a que la sesión esté lista
-              if (!authUnsubFn) {
-                authUnsubFn = supabase.auth.onAuthStateChange((event, session) => {
-                  console.log('[App] 🔐 onAuthStateChange:', event, session ? 'sesión activa' : 'sin sesión');
-                  
-                  if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || (event === 'INITIAL_SESSION' && session)) {
-                    console.log('[App] ✅ Sesión de Supabase lista (evento:', event, '), iniciando suscripción...');
-                    if (mounted && !unsubFn) {
-                      // Limpiar listener de auth
-                      if (authUnsubFn) {
-                        authUnsubFn.data.subscription.unsubscribe();
-                        authUnsubFn = null;
-                      }
-                      // Resetear contador de reintentos
-                      retryCount = 0;
-                      // Iniciar suscripción
-                      startSubscription();
-                    }
-                  }
-                });
-                
-                // También verificar inmediatamente por si la sesión ya está lista (onAuthStateChange puede no dispararse si ya está listo)
-                setTimeout(async () => {
-                  if (mounted && !unsubFn) {
-                    const { data: checkSession } = await supabase.auth.getSession();
-                    if (checkSession?.session) {
-                      console.log('[App] ✅ Sesión encontrada en verificación posterior, iniciando suscripción...');
-                      if (authUnsubFn) {
-                        authUnsubFn.data.subscription.unsubscribe();
-                        authUnsubFn = null;
-                      }
-                      retryCount = 0;
-                      startSubscription();
-                    }
-                  }
-                }, 100);
-              }
-              
-              // También hacer un reintento con timeout como fallback
-              setTimeout(() => {
-                if (mounted && !unsubFn) {
-                  console.log('[App] ⏱️ Timeout de reintento', retryCount, ', verificando nuevamente...');
-                  startSubscription();
-                }
-              }, 500 * retryCount); // Backoff exponencial: 500ms, 1000ms, 1500ms, etc.
-              
-              return;
-            } else {
-              console.warn('[App] ⚠️ Máximo de reintentos alcanzado, suscribiéndose de todos modos...');
-              // Continuar aunque no haya sesión (puede que RLS permita lectura pública)
-            }
-          } else {
-            console.log('[App] ✅ Supabase tiene sesión activa');
-            // Limpiar listener de auth si existe
-            if (authUnsubFn) {
-              authUnsubFn.data.subscription.unsubscribe();
-              authUnsubFn = null;
-            }
-            retryCount = 0; // Resetear contador
-          }
-        }
-        
-        console.log('[App] 🔵🔵🔵 useEffect de productos EJECUTÁNDOSE - INICIANDO suscripción a almacenCentral...', {
-          hasSession: !!session,
-          userId: session?.id,
-          rol: session?.rol,
-          supabaseAuthenticated: true,
-          retryCount: retryCount
-        });
-        
-        const unsub = subscribeCollection('almacenCentral', (newProducts) => {
-        console.log('[App] 📦 Callback de productos ejecutado:', {
-          mounted: mounted,
-          count: newProducts.length,
-          firstProduct: newProducts[0]?.nombre || 'N/A',
-          timestamp: new Date().toISOString()
-        });
-        
-        // Actualizar productos siempre, incluso si mounted es false (React StrictMode puede causar esto)
-        // Pero solo actualizar el estado si realmente el componente está montado
-        if (mounted) {
-          console.log('[App] ✅ Componente montado, actualizando productos');
-          setProducts(newProducts);
-          if (newProducts.length > 0) {
-            setProductsLoaded(true);
-            console.log('[App] ✅✅ PRODUCTOS CARGADOS:', newProducts.length, 'productos disponibles');
-          } else {
-            console.warn('[App] ⚠️ Se recibieron 0 productos. Verifica que haya datos en almacen_central y que RLS permita lectura.');
-            // Aún así marcar como cargado para evitar loops infinitos
-            setProductsLoaded(true);
-          }
-        } else {
-          console.warn('[App] ⚠️ Componente desmontado (StrictMode), pero productos recibidos:', newProducts.length);
-          // En StrictMode, puede que se desmonte y monte de nuevo rápidamente
-          // Si recibimos datos, guardarlos de todos modos
-          setProducts(newProducts);
-          if (newProducts.length > 0) {
-            setProductsLoaded(true);
-          }
-        }
-      });
-      
-        unsubFn = unsub;
-        console.log('[App] ✅ Suscripción configurada, unsub function:', typeof unsub);
-      } catch (error) {
-        console.error('[App] ❌ ERROR iniciando suscripción de productos:', error);
-        // Reintentar después de un delay si hay error
-        if (mounted && retryCount < MAX_RETRIES) {
-          retryCount++;
-          setTimeout(() => {
-            if (mounted) {
-              startSubscription();
-            }
-          }, 1000 * retryCount);
-        }
+      setProducts(newProducts);
+      if (newProducts.length > 0) {
+        setProductsLoaded(true);
+      } else {
+        setProductsLoaded(true); // Marcar como cargado aunque esté vacío
       }
-    };
+    });
     
-    // Iniciar suscripción (con verificación de autenticación)
-    startSubscription();
+    unsubFn = unsub;
     
     return () => {
-      console.log('[App] 🔴 Cleanup: desuscribiendo de almacenCentral (mounted:', mounted, ')');
       mounted = false;
-      
-      // Limpiar listener de auth si existe
-      if (authUnsubFn) {
-        try {
-          authUnsubFn.data.subscription.unsubscribe();
-        } catch (e) {
-          console.warn('[App] Error limpiando auth listener:', e);
-        }
-        authUnsubFn = null;
-      }
-      
-      // Limpiar suscripción de productos
       if (unsubFn && typeof unsubFn === 'function') {
         unsubFn();
       }
     };
-  }, [session]); // Agregar session como dependencia
+  }, [session, supabaseReady]);
 
   // Suscripción en tiempo real a cityStock (ejemplo: puedes guardar en un estado aparte)
   const [cityStock, setCityStock] = useState([]);
@@ -2632,7 +2566,7 @@ function Sidebar({ session, onLogout, view, setView, showMobileNav, setShowMobil
               </AnimatePresence>
             </div>
           </nav>
-          <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm">
+          <button onClick={onLogout} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-800/80 text-sm mb-20 md:mb-0">
             <LogOut className="w-4 h-4" /> Cerrar Sesion
           </button>
         </>
