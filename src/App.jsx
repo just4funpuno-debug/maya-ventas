@@ -4,7 +4,6 @@ import { registrarVentaPendiente, discountCityStock, restoreCityStock, adjustCit
 import AlmacenCityStock from "./components/AlmacenCityStock";
 import ConfirmModal from "./components/ConfirmModal";
 import ErrorModal from "./components/ErrorModal";
-import { uploadProductImage } from "./cloudinary";
 import { uploadImageToSupabase, uploadComprobanteToSupabase } from "./supabaseStorage";
 import { compressImage } from "./utils/imageCompression";
 import { validateStockForSale } from "./utils/stockValidation";
@@ -22,6 +21,7 @@ import BlockedContactsPanel from "./components/whatsapp/BlockedContactsPanel";
 // Logo centralizado para reutilizar en sidebar y otros componentes
 const LOGO_URL = "https://res.cloudinary.com/djtpn0kl9/image/upload/v1757639417/favicon_kxrcop.png";
 import { supabase } from "./supabaseClient";
+import { hasUserSeenGreetingToday, getNextPhraseForUser, logUserGreeting } from "./services/motivationalPhrases";
 // --- FLUJO DE INVENTARIO MULTI-CIUDAD ---
 // Estructura recomendada:
 // 1. almacenCentral: inventario principal. Solo se descuenta cuando se envía stock a una ciudad.
@@ -171,7 +171,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Toolti
 import {
   LogIn, LogOut, ShoppingCart, CircleDollarSign, TrendingUp, AlertTriangle, Upload, Plus,
   Package, FileSpreadsheet, Wallet, Settings, X, UserPlus, MapPin, Search, Plane, Clock, Check, History,
-  ArrowLeft, ArrowRight, MessageSquare, Menu, ChevronDown
+  ArrowLeft, ArrowRight, MessageSquare, Menu, ChevronDown, BookOpen, Pencil, Save
 } from "lucide-react";
 import Papa from "papaparse";
 
@@ -987,30 +987,74 @@ function App() {
     return () => unsub();
   }, [view, products]);
 
-  // Mostrar saludo motivacional a vendedoras (no admin) una vez al día
+  // Mostrar saludo motivacional una vez al día (vendedoras y admin) usando Supabase
   useEffect(()=>{
-    if(!session || session.rol !== 'seller') return;
-    try {
-      const key = `ventas.greeting.${session.id}`;
-      const data = JSON.parse(localStorage.getItem(key)||'null');
-      const hoy = todayISO();
-      if(data && data.date === hoy) return; // ya mostrado hoy
-      // Obtener pool restante de frases sin repetir hasta completar ciclo
-      const poolKey = `ventas.greeting.pool.${session.id}`;
-      let pool = JSON.parse(localStorage.getItem(poolKey)||'null');
-      if(!Array.isArray(pool) || pool.length===0){
-        // reiniciar pool barajado
-        pool = [...FRASES_MOTIVACION].sort(()=>Math.random()-0.5);
+    if(!session) return;
+    
+    (async function showGreeting() {
+      try {
+        console.log('[Greeting] Verificando si debe mostrarse el saludo...', { userId: session.id, rol: session.rol });
+        
+        // Verificar si ya vio el saludo hoy (usando Supabase)
+        const { data: alreadySeen, error: checkError } = await hasUserSeenGreetingToday(session.id);
+        
+        if (checkError) {
+          console.error('[Greeting] Error verificando si ya vio el saludo:', checkError);
+          // Continuar intentando mostrar el saludo aunque haya error
+        } else if (alreadySeen) {
+          console.log('[Greeting] Ya se mostró el saludo hoy');
+          return; // Ya mostrado hoy
+        }
+        
+        console.log('[Greeting] No se ha mostrado hoy, obteniendo frase...');
+        
+        // Obtener próxima frase del pool (usando Supabase)
+        const { data: phraseData, error: phraseError } = await getNextPhraseForUser(session.id);
+        
+        if (phraseError) {
+          console.error('[Greeting] Error obteniendo frase:', phraseError);
+          return;
+        }
+        
+        if (!phraseData || !phraseData.phrase_text) {
+          console.log('[Greeting] NO se mostrará el modal porque no hay frase disponible');
+          return;
+        }
+        
+        console.log('[Greeting] Frase obtenida correctamente:', phraseData);
+        
+        // Saludo según hora Bolivia
+        const h = horaBolivia();
+        const saludo = h < 12 ? 'Buenos días' : (h < 18 ? 'Buenas tardes' : 'Buenas noches');
+        const nombre = (session.nombre||'').split(' ')[0];
+        
+        console.log('[Greeting] Mostrando saludo:', { saludo, nombre, frase: phraseData.phrase_text, phraseId: phraseData.phrase_id });
+        
+        // Mostrar el saludo
+        setGreeting({ 
+          saludo, 
+          nombre: nombre.toUpperCase(), 
+          frase: phraseData.phrase_text,
+          phraseId: phraseData.phrase_id 
+        });
+        
+        // Registrar en Supabase que vio el saludo (async, no bloquea)
+        try {
+          const { error: logError } = await logUserGreeting(session.id, phraseData.phrase_id, phraseData.phrase_text, saludo);
+          if (logError) {
+            console.error('[Greeting] Error registrando saludo:', logError);
+            // No afecta la visualización del saludo
+          } else {
+            console.log('[Greeting] Saludo registrado correctamente en Supabase');
+          }
+        } catch (err) {
+          console.error('[Greeting] Error fatal registrando saludo:', err);
+        }
+        
+      } catch (err) {
+        console.error('[Greeting] Error fatal:', err);
       }
-      const frase = pool.shift();
-      localStorage.setItem(poolKey, JSON.stringify(pool));
-      localStorage.setItem(key, JSON.stringify({ date: hoy, frase }));
-      // Saludo según hora Bolivia
-      const h = horaBolivia();
-      const saludo = h < 12 ? 'Buenos días' : (h < 18 ? 'Buenas tardes' : 'Buenas noches');
-      const nombre = (session.nombre||'').split(' ')[0];
-      setGreeting({ saludo, nombre: nombre.toUpperCase(), frase });
-    } catch {/* ignore */}
+    })();
   }, [session]);
 
   // Habilitar botón de cierre tras 5s (no autocierra)
@@ -1122,6 +1166,10 @@ function App() {
         collapsed={sidebarCollapsed}
         setCollapsed={setSidebarCollapsed}
       />
+      {/* Mensajes de equipo (botón flotante) - FUERA del overflow para que funcione el fixed */}
+      {view === 'dashboard' && (
+        <TeamMessagesWidget session={session} users={users} teamMessages={teamMessages} setTeamMessages={setTeamMessages} />
+      )}
       {/* Transición animada entre pantallas principales en móvil */}
   <div className={`flex-1 relative pb-16 transition-all duration-300 ${sidebarCollapsed ? 'md:ml-14' : 'md:ml-0'} overflow-y-auto`}> 
         <AnimatePresence mode="wait">
@@ -1146,6 +1194,14 @@ function App() {
                 depositSnapshots={depositSnapshots}
                 historicoHoy={historicoHoy}
                 ventasAll={ventasAll}
+                editingReceipt={editingReceipt}
+                setEditingReceipt={setEditingReceipt}
+                receiptTemp={receiptTemp}
+                setReceiptTemp={setReceiptTemp}
+                receiptFile={receiptFile}
+                setReceiptFile={setReceiptFile}
+                uploadingReceipt={uploadingReceipt}
+                setUploadingReceipt={setUploadingReceipt}
                 onOpenReceipt={(sale)=> sale?.comprobante && setViewingReceipt({ id:sale.id, data:sale.comprobante })}
                 onEditReceipt={(sale)=> { setEditingReceipt(sale); setReceiptTemp(sale.comprobante||null); setReceiptFile(null); }}
               />
@@ -1179,7 +1235,7 @@ function App() {
               transition={{ duration: 0.5, ease: 'easeInOut' }}
               className="absolute inset-0 pb-safe"
             >
-              <VentasView sales={sales} setSales={setSales} products={products} session={session} dispatches={dispatches} setDispatches={setDispatches} setProducts={setProducts} setView={navigate} setDepositSnapshots={setDepositSnapshots} />
+              <VentasView sales={sales} setSales={setSales} products={products} session={session} users={users} dispatches={dispatches} setDispatches={setDispatches} setProducts={setProducts} setView={navigate} setDepositSnapshots={setDepositSnapshots} />
             </motion.div>
           )}
           {view === 'deposit' && session.rol==='admin' && (
@@ -1191,7 +1247,7 @@ function App() {
               transition={{ duration: 0.5, ease: 'easeInOut' }}
               className="absolute inset-0 pb-safe"
             >
-              <DepositConfirmView snapshots={depositSnapshots} setSnapshots={setDepositSnapshots} products={products} setSales={setSales} onBack={()=> setView('historial')} />
+              <DepositConfirmView snapshots={depositSnapshots} setSnapshots={setDepositSnapshots} products={products} setSales={setSales} users={users} onBack={()=> setView('historial')} />
             </motion.div>
           )}
           {view === 'almacen' && session.rol === 'admin' && (
@@ -1368,6 +1424,45 @@ function App() {
         {/* Barra inferior móvil persistente fuera de las vistas animadas para no desmontarse */}
         <MobileBottomNav view={view} setView={navigate} />
       </div>
+      {/* Modal de saludo motivacional */}
+      <AnimatePresence>
+        {greeting && (
+          <Modal
+            onClose={() => setGreeting(null)}
+            disableClose={!greetingCloseReady}
+            autoWidth
+          >
+            <div className="space-y-4 w-full max-w-[480px] px-1">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-[#e7922b] mb-2">
+                  {greeting.saludo}
+                </h2>
+                <p className="text-lg text-neutral-300 font-semibold mb-4">
+                  {greeting.nombre}
+                </p>
+              </div>
+              <div className="bg-[#0f171e] rounded-xl p-6 border border-[#e7922b]/30">
+                <p className="text-neutral-200 text-center text-base leading-relaxed italic">
+                  "{greeting.frase}"
+                </p>
+              </div>
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={() => setGreeting(null)}
+                  disabled={!greetingCloseReady}
+                  className={`px-6 py-2 rounded-xl font-semibold text-sm transition-all ${
+                    greetingCloseReady
+                      ? 'bg-[#e7922b] text-[#1a2430] hover:brightness-110 active:scale-95 cursor-pointer'
+                      : 'bg-neutral-700 text-neutral-500 cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  {greetingCloseReady ? 'Continuar' : 'Espera un momento...'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
       {/* Modales globales de comprobantes */}
       <AnimatePresence>
         {/* TABLA_LUPA_DETALLE_ENTREGA: modal que aparece al hacer click en la lupa de una entrega confirmada */}
@@ -1529,19 +1624,142 @@ function App() {
 
 // ---------------------- Frases Motivacionales ----------------------
 function FrasesView(){
-  const frases = FRASES_MOTIVACION;
+  const [frases, setFrases] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+  
+  const loadPhrases = async () => {
+    try {
+      setLoading(true);
+      const { getAllPhrases } = await import('./services/motivationalPhrases');
+      const { data, error } = await getAllPhrases();
+      if (error) {
+        console.error('[FrasesView] Error cargando frases:', error);
+        toast.push({ type: 'error', title: 'Error', message: 'Error al cargar frases: ' + (error?.message || 'Error desconocido') });
+        setFrases([]);
+      } else {
+        setFrases(data || []);
+      }
+    } catch (err) {
+      console.error('[FrasesView] Error fatal:', err);
+      toast.push({ type: 'error', title: 'Error', message: 'Error fatal al cargar frases' });
+      setFrases([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    loadPhrases();
+  }, []);
+  
+  const handleEdit = (frase) => {
+    setEditingId(frase.id);
+    setEditText(frase.phrase_text);
+  };
+  
+  const handleCancel = () => {
+    setEditingId(null);
+    setEditText('');
+  };
+  
+  const handleSave = async () => {
+    if (!editText.trim()) {
+      toast.push({ type: 'error', title: 'Error', message: 'La frase no puede estar vacía' });
+      return;
+    }
+    
+    if (saving) return;
+    
+    try {
+      setSaving(true);
+      const { updatePhrase } = await import('./services/motivationalPhrases');
+      const { data, error } = await updatePhrase(editingId, { phrase_text: editText.trim() });
+      
+      if (error) {
+        console.error('[FrasesView] Error actualizando frase:', error);
+        toast.push({ type: 'error', title: 'Error', message: 'Error al actualizar frase: ' + (error?.message || 'Error desconocido') });
+      } else {
+        toast.push({ type: 'success', title: 'Éxito', message: 'Frase actualizada correctamente' });
+        setEditingId(null);
+        setEditText('');
+        // Recargar frases para reflejar los cambios
+        await loadPhrases();
+      }
+    } catch (err) {
+      console.error('[FrasesView] Error fatal actualizando frase:', err);
+      toast.push({ type: 'error', title: 'Error', message: 'Error fatal al actualizar frase' });
+    } finally {
+      setSaving(false);
+    }
+  };
+  
   return (
     <div className="flex-1 p-6 bg-[#121f27] overflow-auto">
       <header className="mb-4">
         <h2 className="text-xl font-semibold">Frases motivacionales</h2>
       </header>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {frases.map((fr,i)=>(
-          <div key={i} className="p-4 rounded-xl bg-[#0f171e] border border-neutral-800 text-sm leading-snug text-neutral-200 shadow">
-            “{fr}”
-          </div>
-        ))}
-      </div>
+      {loading ? (
+        <div className="text-center text-neutral-400 py-8">Cargando frases...</div>
+      ) : frases.length === 0 ? (
+        <div className="text-center text-neutral-400 py-8">No hay frases disponibles</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {frases.map((fr)=>(
+            <div key={fr.id} className="relative p-4 rounded-xl bg-[#0f171e] border border-neutral-800 text-sm leading-snug text-neutral-200 shadow group">
+              {editingId === fr.id ? (
+                <div className="space-y-3">
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-[#e7922b] resize-none"
+                    rows={3}
+                    disabled={saving}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={handleCancel}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded-lg bg-neutral-700 text-xs text-neutral-300 hover:bg-neutral-600 disabled:opacity-50 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      disabled={saving || !editText.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-[#e7922b] text-xs text-[#1a2430] font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+                    >
+                      {saving ? (
+                        <>
+                          <span className="animate-spin">⏳</span> Guardando...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5" /> Guardar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="pr-8">"{fr.phrase_text}"</p>
+                  <button
+                    onClick={() => handleEdit(fr)}
+                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-neutral-800/70 opacity-0 group-hover:opacity-100 hover:bg-neutral-700 transition-all text-neutral-400 hover:text-[#e7922b]"
+                    title="Editar frase"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1716,38 +1934,25 @@ function LoginForm({ users, onLogin }) {
         throw new Error("Credenciales incorrectas");
       }
       
-      // Buscar datos extra en Supabase - primero por auth_id, luego por id directo
+      // Buscar datos extra en Supabase - primero por id directo, luego por username
       let userData = null;
       let userError = null;
       
-      // Intentar buscar por auth_id (si está vinculado)
-      const { data: userByAuthId, error: errorByAuthId } = await supabase
+      // Buscar por id directo (el id de auth.users coincide con el id de users)
+      const { data: userById, error: errorById } = await supabase
         .from('users')
         .select('*')
-        .eq('auth_id', authUser.uid)
+        .eq('id', authUser.uid)
         .maybeSingle();
       
-      if (errorByAuthId) {
-        warn('[loginUser] Error buscando usuario por auth_id:', errorByAuthId);
-      } else if (userByAuthId) {
-        userData = userByAuthId;
-      } else {
-        // Si no se encuentra por auth_id, buscar por id directo
-        const { data: userById, error: errorById } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', authUser.uid)
-          .maybeSingle();
-        
-        if (errorById) {
-          warn('[loginUser] Error buscando usuario por id:', errorById);
-          userError = errorById;
-        } else if (userById) {
-          userData = userById;
-        }
+      if (errorById) {
+        warn('[loginUser] Error buscando usuario por id:', errorById);
+        userError = errorById;
+      } else if (userById) {
+        userData = userById;
       }
       
-      // Si aún no se encuentra, buscar por username (email sin dominio)
+      // Si no se encuentra por id, buscar por username (email sin dominio)
       // Normalizar a minúsculas para búsqueda case-insensitive
       if (!userData) {
         const usernameFromEmail = (email.includes('@') ? email.split('@')[0] : email).toLowerCase().trim();
@@ -1939,6 +2144,7 @@ function Sidebar({ session, onLogout, view, setView, showMobileNav, setShowMobil
                       <button onClick={() => { setView('almacen'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='almacen'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='almacen'? 'text-[#273947]' : 'text-white')} /> Despacho de Productos</button>
                       <button onClick={() => { setView('products'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full flex items-center gap-2 p-2 rounded-xl text-left transition btn-animated "+(view==='products'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><Package className={"w-4 h-4 "+(view==='products'? 'text-[#273947]' : 'text-white')} /> Almacen Central</button>
                       <button onClick={() => { setView('create-user'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='create-user'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><UserPlus className={"w-4 h-4 "+(view==='create-user'? 'text-[#273947]' : 'text-white')} /> Usuarios</button>
+                      {session.rol === 'admin' && <button onClick={() => { setView('frases'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='frases'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><BookOpen className={"w-4 h-4 "+(view==='frases'? 'text-[#273947]' : 'text-white')} /> 📚 Frases</button>}
                       <button onClick={() => { setView('whatsapp-accounts'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='whatsapp-accounts'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><MessageSquare className={"w-4 h-4 "+(view==='whatsapp-accounts'? 'text-[#273947]' : 'text-white')} /> WhatsApp</button>
                       {session.rol === 'admin' && <button onClick={() => { setView('whatsapp-sequences'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='whatsapp-sequences'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><MessageSquare className={"w-4 h-4 "+(view==='whatsapp-sequences'? 'text-[#273947]' : 'text-white')} /> 📋 CRM</button>}
                       {session.rol === 'admin' && <button onClick={() => { setView('whatsapp-dashboard'); if (showMobileNav) setShowMobileNav(false); if (!showMobileNav && window.innerWidth >= 768) setCollapsed(true); }} className={"w-full text-left flex items-center gap-2 p-2 rounded-xl transition btn-animated "+(view==='whatsapp-dashboard'? 'bg-[#ea9216] text-[#313841]' : 'hover:bg-[#313841]')}><MessageSquare className={"w-4 h-4 "+(view==='whatsapp-dashboard'? 'text-[#273947]' : 'text-white')} /> 💬 Chat WhatsApp</button>}
@@ -1983,7 +2189,7 @@ function Sidebar({ session, onLogout, view, setView, showMobileNav, setShowMobil
 }
 
 // ---------------------- Main ----------------------
-function Main({ products, setProducts, sales, setSales, session, users, teamMessages, setTeamMessages, depositSnapshots, historicoHoy, ventasAll }) {
+function Main({ products, setProducts, sales, setSales, session, users, teamMessages, setTeamMessages, depositSnapshots, historicoHoy, ventasAll, editingReceipt, setEditingReceipt, receiptTemp, setReceiptTemp, receiptFile, setReceiptFile, uploadingReceipt, setUploadingReceipt }) {
   const [showSale, setShowSale] = useState(false);
   const lowStock = useMemo(() => products.filter((p) => p.stock <= 10), [products]);
   const [period, setPeriod] = useState('week'); // 'week' | 'month' | 'quarter'
@@ -2090,8 +2296,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
     }
   }, [secondConfirm]);
   // Edición / carga de comprobante (QR)
-  const [editingReceipt, setEditingReceipt] = useState(null); // objeto venta
-  const [receiptTemp, setReceiptTemp] = useState(null); // base64 temporal
   // Reprogramar pedido pendiente
   const [reschedulingSale, setReschedulingSale] = useState(null); // objeto venta
   const [rsFecha, setRsFecha] = useState(todayISO());
@@ -2490,7 +2694,7 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
   }
 
   return (
-    <div className="flex-1 p-6 bg-[#121f27]">
+    <div className="flex-1 p-6 bg-[#121f27] relative">
       <header className="mb-4">
         <h2 className="text-xl font-semibold">Dashboard</h2>
       </header>
@@ -2504,8 +2708,6 @@ function Main({ products, setProducts, sales, setSales, session, users, teamMess
   </div>
       )}
 
-  {/* Mensajes de equipo (botón flotante) */}
-  <TeamMessagesWidget session={session} users={users} teamMessages={teamMessages} setTeamMessages={setTeamMessages} />
   {/* Entregas pendientes por fecha (hoy y futuras) */}
 
   {(() => {
@@ -3605,22 +3807,15 @@ function ProductsView({ products, setProducts, session }) {
     if (sintetico) data.sintetico = true;
     // Subir imagen si es base64 (no URL) y hay imagen
     // En localhost: usar Supabase Storage
-    // En Vercel: usar Cloudinary
+    // Usar Supabase Storage siempre
     let urlImagen = null;
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     
     if (typeof imagen === 'string' && imagen.startsWith('data:')) {
-      setMensaje(isLocalhost ? 'Subiendo imagen a Supabase Storage...' : 'Subiendo imagen a Cloudinary...');
+      setMensaje('Subiendo imagen a Supabase Storage...');
       try {
-        if (isLocalhost) {
-          // Usar Supabase Storage en localhost
-          const result = await uploadImageToSupabase(imagen, 'productos');
-          urlImagen = result.url;
-        } else {
-          // Usar Cloudinary en Vercel
-          const result = await uploadProductImage(imagen, { folder: 'maya-productos' });
-          urlImagen = result.secure_url;
-        }
+        // Usar Supabase Storage (tanto en localhost como en Vercel)
+        const result = await uploadImageToSupabase(imagen, 'productos');
+        urlImagen = result.url;
       } catch (err) {
         setMensaje(`Error subiendo imagen: ${err && err.message ? err.message : String(err)}`);
         return;
@@ -6334,13 +6529,36 @@ function KPI({ icon, label, value }) {
 
 // Widget flotante: botón + modal
 function TeamMessagesWidget({ session, users, teamMessages, setTeamMessages }) {
+  console.log('[TeamMessagesWidget] 🚀 Componente ejecutándose...', { hasSession: !!session, sessionRol: session?.rol });
+  
+  // Debug: verificar session y rol
+  if (!session) {
+    console.log('[TeamMessagesWidget] ❌ No hay session, ocultando widget');
+    return null;
+  }
+  
   const myGroup = (users.find(u=>u.id===session.id)?.grupo) || session.grupo || '';
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   // Para admin: selección de grupo a visualizar y a enviar
   const isAdmin = session?.rol === 'admin';
+  
+  // Debug logs
+  console.log('[TeamMessagesWidget] 🔍 Debug:', {
+    hasSession: !!session,
+    sessionId: session?.id,
+    sessionRol: session?.rol,
+    isAdmin,
+    usersLength: users?.length || 0
+  });
+  
   // Nueva restricción: solo admins pueden ver/usar el widget (ocultar para vendedores)
-  if(!isAdmin) return null;
+  if(!isAdmin) {
+    console.log('[TeamMessagesWidget] ❌ Usuario no es admin, ocultando widget');
+    return null;
+  }
+  
+  console.log('[TeamMessagesWidget] ✅ Usuario es admin, mostrando widget');
   const allGroups = useMemo(()=> Array.from(new Set(users.map(u=>u.grupo).filter(Boolean))).sort(), [users]);
   const [viewGroup, setViewGroup] = useState(isAdmin ? '__ALL__' : myGroup);
   const [sendGroup, setSendGroup] = useState(isAdmin ? '' : myGroup);
@@ -6483,24 +6701,31 @@ function TeamMessagesWidget({ session, users, teamMessages, setTeamMessages }) {
   }
   function remove(id){ setTeamMessages(prev=> prev.filter(m=>m.id!==id)); if(confirmDeleteId===id) setConfirmDeleteId(null); }
   useEffect(()=>{ setConfirmDeleteId(null); }, [viewGroup, open]);
+  
+  console.log('[TeamMessagesWidget] 🎨 Renderizando JSX:', { open, shouldShowButton: !open });
+  
   return (
     <>
-      <AnimatePresence>
-        {!open && (
-          <motion.button
-            initial={{ scale: 0.7, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.7, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-            onClick={()=>setOpen(true)}
-            className="fixed right-6 z-40 w-12 h-12 rounded-full bg-[#e7922b] text-[#1a2430] font-bold shadow-lg flex items-center justify-center hover:brightness-110 active:scale-95"
-            style={{ bottom: '6rem', ...(window.innerWidth <= 640 ? { bottom: '5rem' } : {}) }}
-          >
-            <MessageSquare className="w-6 h-6" />
-            {unread>0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">{unread}</span>}
-          </motion.button>
-        )}
-      </AnimatePresence>
+      {!open && (
+        <button
+          onClick={()=>{
+            console.log('[TeamMessagesWidget] 🖱️ Botón CLICKEADO!');
+            setOpen(true);
+          }}
+          className="fixed right-6 z-[9999] w-12 h-12 rounded-full bg-[#e7922b] text-[#1a2430] font-bold shadow-lg flex items-center justify-center hover:brightness-110 active:scale-95"
+          style={{ 
+            bottom: window.innerWidth <= 640 ? '5rem' : '6rem',
+            right: '1.5rem',
+            position: 'fixed',
+            zIndex: 9999,
+            opacity: 1,
+            visibility: 'visible'
+          }}
+        >
+          <MessageSquare className="w-6 h-6" />
+          {unread>0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">{unread}</span>}
+        </button>
+      )}
       <AnimatePresence>
         {open && (
           <Modal onClose={()=>setOpen(false)}>
@@ -6758,7 +6983,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   const [cantidadExtra, setCantidadExtra] = useState(0);
   // Métodos disponibles restringidos a Delivery y Encomienda. Iniciar en Delivery.
   const [metodo, setMetodo] = useState("Delivery");
-  const [comprobanteFile, setComprobanteFile] = useState(null); // File para Cloudinary
+  const [comprobanteFile, setComprobanteFile] = useState(null); // File para Supabase Storage
   const [comprobanteUrl, setComprobanteUrl] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
   const [celular, setCelular] = useState("");
@@ -6803,10 +7028,9 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
   if(!esSintetico && comprobanteFile){
     try {
       setSubiendo(true);
-      const mod = await import('./cloudinary.js');
-      if(typeof mod.uploadProductImage !== 'function') throw new Error('uploadProductImage no encontrada');
-      const res = await mod.uploadProductImage(comprobanteFile, { folder:'comprobantes' });
-      comprobanteFinal = res.secure_url;
+      // Usar Supabase Storage (tanto en localhost como en Vercel)
+      const result = await uploadComprobanteToSupabase(comprobanteFile, 'comprobantes');
+      comprobanteFinal = result.url || result.secure_url;
       setComprobanteUrl(comprobanteFinal);
     } catch(err){
       console.error('Error subiendo comprobante', err);
@@ -6920,7 +7144,7 @@ function SaleForm({ products, session, onSubmit, initialSku, fixedCity }) {
                       if(f.size > 2*1024*1024){ toast.push({ type: 'error', title: 'Error', message: 'Archivo supera 2MB' }); return; }
                       setComprobanteFile(f);
                     }} className="text-xs" />
-                    <div className="text-[10px] text-neutral-500">Se subirá a Cloudinary al guardar (máx 2MB).</div>
+                    <div className="text-[10px] text-neutral-500">Se subirá a Supabase Storage al guardar (máx 2MB).</div>
                     {subiendo && <div className="text-[10px] text-blue-400">Subiendo...</div>}
                     {comprobanteUrl && <div className="text-[10px] text-green-400">Subido: <a href={comprobanteUrl} target="_blank" rel="noreferrer" className="underline">ver</a></div>}
                     {!comprobanteUrl && comprobanteFile && !subiendo && <div className="text-[10px] text-neutral-400">Listo para subir.</div>}
@@ -7109,7 +7333,7 @@ function RegisterSaleView({ products, setProducts, sales, setSales, session, dis
 }
 
 // ---------------------- Ventas (listado dedicado) ----------------------
-function VentasView({ sales, setSales, products, session, dispatches, setDispatches, setProducts, setView, setDepositSnapshots }) {
+function VentasView({ sales, setSales, products, session, users = [], dispatches, setDispatches, setProducts, setView, setDepositSnapshots }) {
   const cities = ["EL ALTO","LA PAZ","ORURO","SUCRE","POTOSI","TARIJA","COCHABAMBA","SANTA CRUZ","PRUEBA"]; // removido 'SIN CIUDAD'
   const [cityFilter, setCityFilter] = useState(()=>{
     try {
@@ -7178,7 +7402,7 @@ function VentasView({ sales, setSales, products, session, dispatches, setDispatc
           <>
             <CityPendingShipments city={cityFilter} dispatches={dispatches} setDispatches={setDispatches} products={products} session={session} />
             <CityStock key={`${cityFilter}-${sales.length}`} city={cityFilter} products={products} sales={sales} dispatches={dispatches.filter(d=>d.status==='confirmado')} setSales={setSales} session={session} />
-            <CitySummary city={cityFilter} sales={sales} setSales={setSales} products={products} session={session} setProducts={setProducts} setView={setView} setDepositSnapshots={setDepositSnapshots} />
+            <CitySummary city={cityFilter} sales={sales} setSales={setSales} products={products} session={session} users={users} setProducts={setProducts} setView={setView} setDepositSnapshots={setDepositSnapshots} />
           </>
         )}
   {/* Tabla de ventas removida a solicitud. */}
@@ -7188,7 +7412,7 @@ function VentasView({ sales, setSales, products, session, dispatches, setDispatc
 }
 
 // Resumen tipo cuadro para una ciudad seleccionada
-function CitySummary({ city, sales, setSales, products, session, setProducts, setView, setDepositSnapshots }) {
+function CitySummary({ city, sales, setSales, products, session, users = [], setProducts, setView, setDepositSnapshots }) {
   // Replicar lógica de historial: solo mostrar confirmadas y canceladas con costo
   const cityNorm = useMemo(() => (city||'').toUpperCase(), [city]);
   
@@ -7342,8 +7566,26 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
     ];
     return fields
       .map(f => {
-        const oldVal = original[f.key] ?? '';
-        const newVal = updated[f.key] ?? '';
+        let oldVal = original[f.key] ?? '';
+        let newVal = updated[f.key] ?? '';
+
+        // Para vendedora: mostrar solo primer nombre en el modal
+        if (f.key === 'vendedora') {
+          oldVal = firstName(String(oldVal));
+          newVal = firstName(String(newVal));
+        }
+
+        // Para campos numéricos: normalizar comparación (evitar falsos positivos)
+        const camposNumericos = ['precio', 'cantidad', 'cantidadExtra', 'gasto'];
+        if (camposNumericos.includes(f.key)) {
+          const oldNum = Number(oldVal || 0);
+          const newNum = Number(newVal || 0);
+          if (oldNum !== newNum) {
+            return { label: f.label, before: oldVal, after: newVal };
+          }
+          return null;
+        }
+
         if (String(oldVal) !== String(newVal)) {
           return { label: f.label, before: oldVal, after: newVal };
         }
@@ -7849,7 +8091,19 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
                   </label>
                 )}
                 <label className="flex flex-col gap-1">Vendedor(a)
-                  <input value={editForm.vendedora} onChange={e=>updateEditField('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                  <select value={editForm.vendedora || ''} onChange={e=>updateEditField('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                    <option value="">— Seleccionar —</option>
+                    {users.map(u => {
+                      const nombreCompleto = `${u.nombre || ''} ${u.apellidos || ''}`.trim();
+                      // Solo primera palabra del nombre (ej: "Wendy Nayeli" -> "Wendy")
+                      const primerNombre = (u.nombre || '').split(' ')[0] || u.id;
+                      return (
+                        <option key={u.id} value={nombreCompleto}>
+                          {primerNombre}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </label>
                 <label className="flex flex-col gap-1">Celular
                   <input value={editForm.celular} onChange={e=>updateEditField('celular', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
@@ -8022,7 +8276,7 @@ function CitySummary({ city, sales, setSales, products, session, setProducts, se
 }
 
 // ---------------------- Vista Generar Depósito ----------------------
-function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBack }) {
+function DepositConfirmView({ snapshots, setSnapshots, products, setSales, users = [], onBack }) {
   const toast = useToast();
   // Estado para mostrar el modal de detalle de pedidos
   const [showDepositDetail, setShowDepositDetail] = useState(false);
@@ -8605,7 +8859,18 @@ function DepositConfirmView({ snapshots, setSnapshots, products, setSales, onBac
                 </select>
               </label>
               <label className="flex flex-col gap-1">Vendedor(a)
-                <input value={formValues.vendedora || ''} onChange={e=>updateForm('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
+                <select value={formValues.vendedora || ''} onChange={e=>updateForm('vendedora', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1">
+                  <option value="">— Seleccionar —</option>
+                  {users.map(u => {
+                    const nombreCompleto = `${u.nombre || ''} ${u.apellidos || ''}`.trim();
+                    const primerNombre = u.nombre ? u.nombre.split(' ')[0] : u.id; // Extract first name
+                    return (
+                      <option key={u.id} value={nombreCompleto}>
+                        {primerNombre}
+                      </option>
+                    );
+                  })}
+                </select>
               </label>
               <label className="flex flex-col gap-1">Celular
                 <input value={formValues.celular || ''} onChange={e=>updateForm('celular', e.target.value)} className="bg-neutral-800 rounded-lg px-2 py-1" />
