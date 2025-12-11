@@ -1135,6 +1135,7 @@ function App() {
 
   // Sincroniza productos en tiempo real desde Firestore (colección almacenCentral)
   // IMPORTANTE: Esperar a que haya sesión Y que Supabase esté autenticado para evitar problemas de RLS
+  // Mejorado para móviles: usa onAuthStateChange para esperar a que Supabase esté listo
   useEffect(() => {
     // No suscribirse si no hay sesión (el usuario aún no está autenticado)
     if (!session) {
@@ -1144,33 +1145,94 @@ function App() {
       return;
     }
     
-    // Verificar que Supabase esté autenticado (importante en móviles con conexiones lentas)
     let mounted = true;
     let unsubFn = null;
+    let authUnsubFn = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 10; // Máximo 10 reintentos (hasta 5 segundos en total)
     
     // Función para iniciar suscripción después de verificar autenticación
     const startSubscription = async () => {
+      if (!mounted) return;
+      
       try {
-        // Verificar que Supabase tenga sesión activa (especialmente importante en móviles)
         const { supabase } = await import('./supabaseClient');
-        if (supabase && !supabase._isDummy) {
+        if (!supabase || supabase._isDummy) {
+          console.warn('[App] ⚠️ Supabase no disponible, suscribiéndose de todos modos...');
+          // Continuar aunque sea dummy (puede funcionar en algunos casos)
+        } else {
+          // Verificar que Supabase tenga sesión activa
           const { data: authSession, error: authError } = await supabase.auth.getSession();
           
           if (authError) {
             console.warn('[App] ⚠️ Error verificando sesión de Supabase:', authError);
-            // Continuar de todos modos, puede ser un problema temporal
-          }
-          
-          if (!authSession?.session && !authError) {
-            console.log('[App] ⏸️ Supabase aún no tiene sesión activa, esperando... (móvil/conexión lenta?)');
-            // En móviles, puede tardar un poco más en restaurar la sesión
-            // Esperar un momento y reintentar
-            setTimeout(() => {
-              if (mounted) {
-                startSubscription();
+            // Continuar de todos modos
+          } else if (!authSession?.session) {
+            // No hay sesión aún, esperar usando onAuthStateChange
+            console.log('[App] ⏸️ Supabase aún no tiene sesión activa, esperando con onAuthStateChange... (intento:', retryCount + 1, '/', MAX_RETRIES, ')');
+            
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              
+              // Usar onAuthStateChange para esperar a que la sesión esté lista
+              if (!authUnsubFn) {
+                authUnsubFn = supabase.auth.onAuthStateChange((event, session) => {
+                  console.log('[App] 🔐 onAuthStateChange:', event, session ? 'sesión activa' : 'sin sesión');
+                  
+                  if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || (event === 'INITIAL_SESSION' && session)) {
+                    console.log('[App] ✅ Sesión de Supabase lista (evento:', event, '), iniciando suscripción...');
+                    if (mounted && !unsubFn) {
+                      // Limpiar listener de auth
+                      if (authUnsubFn) {
+                        authUnsubFn.data.subscription.unsubscribe();
+                        authUnsubFn = null;
+                      }
+                      // Resetear contador de reintentos
+                      retryCount = 0;
+                      // Iniciar suscripción
+                      startSubscription();
+                    }
+                  }
+                });
+                
+                // También verificar inmediatamente por si la sesión ya está lista (onAuthStateChange puede no dispararse si ya está listo)
+                setTimeout(async () => {
+                  if (mounted && !unsubFn) {
+                    const { data: checkSession } = await supabase.auth.getSession();
+                    if (checkSession?.session) {
+                      console.log('[App] ✅ Sesión encontrada en verificación posterior, iniciando suscripción...');
+                      if (authUnsubFn) {
+                        authUnsubFn.data.subscription.unsubscribe();
+                        authUnsubFn = null;
+                      }
+                      retryCount = 0;
+                      startSubscription();
+                    }
+                  }
+                }, 100);
               }
-            }, 500);
-            return;
+              
+              // También hacer un reintento con timeout como fallback
+              setTimeout(() => {
+                if (mounted && !unsubFn) {
+                  console.log('[App] ⏱️ Timeout de reintento', retryCount, ', verificando nuevamente...');
+                  startSubscription();
+                }
+              }, 500 * retryCount); // Backoff exponencial: 500ms, 1000ms, 1500ms, etc.
+              
+              return;
+            } else {
+              console.warn('[App] ⚠️ Máximo de reintentos alcanzado, suscribiéndose de todos modos...');
+              // Continuar aunque no haya sesión (puede que RLS permita lectura pública)
+            }
+          } else {
+            console.log('[App] ✅ Supabase tiene sesión activa');
+            // Limpiar listener de auth si existe
+            if (authUnsubFn) {
+              authUnsubFn.data.subscription.unsubscribe();
+              authUnsubFn = null;
+            }
+            retryCount = 0; // Resetear contador
           }
         }
         
@@ -1178,7 +1240,8 @@ function App() {
           hasSession: !!session,
           userId: session?.id,
           rol: session?.rol,
-          supabaseAuthenticated: true
+          supabaseAuthenticated: true,
+          retryCount: retryCount
         });
         
         const unsub = subscribeCollection('almacenCentral', (newProducts) => {
@@ -1213,10 +1276,19 @@ function App() {
         }
       });
       
-      unsubFn = unsub;
-      console.log('[App] ✅ Suscripción configurada, unsub function:', typeof unsub);
+        unsubFn = unsub;
+        console.log('[App] ✅ Suscripción configurada, unsub function:', typeof unsub);
       } catch (error) {
         console.error('[App] ❌ ERROR iniciando suscripción de productos:', error);
+        // Reintentar después de un delay si hay error
+        if (mounted && retryCount < MAX_RETRIES) {
+          retryCount++;
+          setTimeout(() => {
+            if (mounted) {
+              startSubscription();
+            }
+          }, 1000 * retryCount);
+        }
       }
     };
     
@@ -1226,6 +1298,18 @@ function App() {
     return () => {
       console.log('[App] 🔴 Cleanup: desuscribiendo de almacenCentral (mounted:', mounted, ')');
       mounted = false;
+      
+      // Limpiar listener de auth si existe
+      if (authUnsubFn) {
+        try {
+          authUnsubFn.data.subscription.unsubscribe();
+        } catch (e) {
+          console.warn('[App] Error limpiando auth listener:', e);
+        }
+        authUnsubFn = null;
+      }
+      
+      // Limpiar suscripción de productos
       if (unsubFn && typeof unsubFn === 'function') {
         unsubFn();
       }
