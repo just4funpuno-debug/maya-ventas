@@ -1134,7 +1134,7 @@ function App() {
   }, []);
 
   // Sincroniza productos en tiempo real desde Firestore (colección almacenCentral)
-  // IMPORTANTE: Esperar a que haya sesión para evitar problemas de RLS
+  // IMPORTANTE: Esperar a que haya sesión Y que Supabase esté autenticado para evitar problemas de RLS
   useEffect(() => {
     // No suscribirse si no hay sesión (el usuario aún no está autenticado)
     if (!session) {
@@ -1144,17 +1144,44 @@ function App() {
       return;
     }
     
-    console.log('[App] 🔵🔵🔵 useEffect de productos EJECUTÁNDOSE - INICIANDO suscripción a almacenCentral...', {
-      hasSession: !!session,
-      userId: session?.id,
-      rol: session?.rol
-    });
-    
+    // Verificar que Supabase esté autenticado (importante en móviles con conexiones lentas)
     let mounted = true;
     let unsubFn = null;
     
-    try {
-      const unsub = subscribeCollection('almacenCentral', (newProducts) => {
+    // Función para iniciar suscripción después de verificar autenticación
+    const startSubscription = async () => {
+      try {
+        // Verificar que Supabase tenga sesión activa (especialmente importante en móviles)
+        const { supabase } = await import('./supabaseClient');
+        if (supabase && !supabase._isDummy) {
+          const { data: authSession, error: authError } = await supabase.auth.getSession();
+          
+          if (authError) {
+            console.warn('[App] ⚠️ Error verificando sesión de Supabase:', authError);
+            // Continuar de todos modos, puede ser un problema temporal
+          }
+          
+          if (!authSession?.session && !authError) {
+            console.log('[App] ⏸️ Supabase aún no tiene sesión activa, esperando... (móvil/conexión lenta?)');
+            // En móviles, puede tardar un poco más en restaurar la sesión
+            // Esperar un momento y reintentar
+            setTimeout(() => {
+              if (mounted) {
+                startSubscription();
+              }
+            }, 500);
+            return;
+          }
+        }
+        
+        console.log('[App] 🔵🔵🔵 useEffect de productos EJECUTÁNDOSE - INICIANDO suscripción a almacenCentral...', {
+          hasSession: !!session,
+          userId: session?.id,
+          rol: session?.rol,
+          supabaseAuthenticated: true
+        });
+        
+        const unsub = subscribeCollection('almacenCentral', (newProducts) => {
         console.log('[App] 📦 Callback de productos ejecutado:', {
           mounted: mounted,
           count: newProducts.length,
@@ -1188,17 +1215,21 @@ function App() {
       
       unsubFn = unsub;
       console.log('[App] ✅ Suscripción configurada, unsub function:', typeof unsub);
-      
-      return () => {
-        console.log('[App] 🔴 Cleanup: desuscribiendo de almacenCentral (mounted:', mounted, ')');
-        mounted = false;
-        if (unsubFn && typeof unsubFn === 'function') {
-          unsubFn();
-        }
-      };
-    } catch (error) {
-      console.error('[App] ❌ ERROR en useEffect de productos:', error);
-    }
+      } catch (error) {
+        console.error('[App] ❌ ERROR iniciando suscripción de productos:', error);
+      }
+    };
+    
+    // Iniciar suscripción (con verificación de autenticación)
+    startSubscription();
+    
+    return () => {
+      console.log('[App] 🔴 Cleanup: desuscribiendo de almacenCentral (mounted:', mounted, ')');
+      mounted = false;
+      if (unsubFn && typeof unsubFn === 'function') {
+        unsubFn();
+      }
+    };
   }, [session]); // Agregar session como dependencia
 
   // Suscripción en tiempo real a cityStock (ejemplo: puedes guardar en un estado aparte)
