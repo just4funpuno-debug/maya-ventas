@@ -178,7 +178,7 @@ import Papa from "papaparse";
 // ---------------------- Helpers ----------------------
 const currency = (n, cur = "BOB") =>
   new Intl.NumberFormat("es-BO", { style: "currency", currency: cur }).format(Number(n || 0));
-const todayISO = () => {
+export const todayISO = () => {
   const fmt = new Intl.DateTimeFormat('en-CA',{ timeZone:'America/La_Paz', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
   return fmt;
 };

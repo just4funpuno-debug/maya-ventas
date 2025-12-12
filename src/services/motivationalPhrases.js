@@ -6,6 +6,7 @@
  */
 
 import { supabase } from '../supabaseClient';
+import { todayISO } from '../App.jsx';
 
 const PHRASES_TABLE = 'motivational_phrases';
 const GREETING_LOG_TABLE = 'user_greeting_log';
@@ -196,9 +197,10 @@ export async function permanentlyDeletePhrase(phraseId) {
  */
 export async function hasUserSeenGreetingToday(userId, todayDate = null) {
   try {
+    // Usar todayISO() para obtener fecha en zona horaria de Bolivia (America/La_Paz)
     const dateParam = todayDate 
-      ? todayDate.toISOString().split('T')[0] // YYYY-MM-DD
-      : new Date().toISOString().split('T')[0];
+      ? todayDate.toISOString().split('T')[0] // YYYY-MM-DD (si se proporciona una fecha específica)
+      : todayISO(); // Usar fecha de Bolivia, no UTC/local
     
     const { data, error } = await supabase.rpc('has_user_seen_greeting_today', {
       p_user_id: userId,
@@ -256,9 +258,10 @@ export async function getNextPhraseForUser(userId) {
  */
 export async function logUserGreeting(userId, phraseId, phraseText, saludoType, greetingDate = null) {
   try {
+    // Usar todayISO() para obtener fecha en zona horaria de Bolivia (America/La_Paz)
     const dateParam = greetingDate 
-      ? greetingDate.toISOString().split('T')[0] // YYYY-MM-DD
-      : new Date().toISOString().split('T')[0];
+      ? greetingDate.toISOString().split('T')[0] // YYYY-MM-DD (si se proporciona una fecha específica)
+      : todayISO(); // Usar fecha de Bolivia, no UTC/local
     
     const { data, error } = await supabase.rpc('log_user_greeting', {
       p_user_id: userId,
