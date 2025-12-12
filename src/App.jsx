@@ -7419,10 +7419,15 @@ function CitySummary({ city, sales, setSales, products, session, users = [], set
   const confirmadas = useMemo(() => sales
     .filter(s=>(s.ciudad||'').toUpperCase()===cityNorm && (s.estadoEntrega==='entregada' || (s.estadoEntrega||'confirmado')==='confirmado') && !s.settledAt)
     .sort((a,b)=>{
-      const ta = a.confirmadoAt || a.canceladoAt || 0;
-      const tb = b.confirmadoAt || b.canceladoAt || 0;
-      if(tb !== ta) return tb - ta;
+      // 1. Ordenar por fecha (descendente: más reciente primero)
       if(a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+      // 2. Si la fecha es igual, ordenar por hora de entrega (descendente: más tarde primero)
+      const ha = (a.horaEntrega || a.hora || '').split('-')[0].trim();
+      const hb = (b.horaEntrega || b.hora || '').split('-')[0].trim();
+      const minutosA = minutesFrom12(ha);
+      const minutosB = minutesFrom12(hb);
+      if(minutosA !== minutosB) return minutosB - minutosA; // Descendente: más tarde primero
+      // 3. Si fecha y hora son iguales, ordenar por ID (descendente: más reciente primero)
       return (b.id||'').localeCompare(a.id||'');
     }),
     [sales, cityNorm]
@@ -7444,10 +7449,15 @@ function CitySummary({ city, sales, setSales, products, session, users = [], set
   const unificados = useMemo(() => [...confirmadas, ...canceladasConCosto], [confirmadas, canceladasConCosto]);
   
   const filtradas = useMemo(() => unificados.slice().sort((a,b)=> {
-    const ta = a.confirmadoAt || a.canceladoAt || 0;
-    const tb = b.confirmadoAt || b.canceladoAt || 0;
-    if(tb !== ta) return tb - ta;
+    // 1. Ordenar por fecha (descendente: más reciente primero)
     if(a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+    // 2. Si la fecha es igual, ordenar por hora de entrega (descendente: más tarde primero)
+    const ha = (a.horaEntrega || a.hora || '').split('-')[0].trim();
+    const hb = (b.horaEntrega || b.hora || '').split('-')[0].trim();
+    const minutosA = minutesFrom12(ha);
+    const minutosB = minutesFrom12(hb);
+    if(minutosA !== minutosB) return minutosB - minutosA; // Descendente: más tarde primero
+    // 3. Si fecha y hora son iguales, ordenar por ID (descendente: más reciente primero)
     return (b.id||'').localeCompare(a.id||'');
   }), [unificados]);
 
