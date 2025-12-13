@@ -4968,10 +4968,14 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
     [dispatches]
   );
   const dispatchesConfirmadosFiltrados = useMemo(() => 
-    dispatchesConfirmadosBase.filter(d=> (
-      (!filtroCiudad || d.ciudad === filtroCiudad) &&
-      (!fechaDesdeConf || d.fecha >= fechaDesdeConf) && (!fechaHastaConf || d.fecha <= fechaHastaConf)
-    )),
+    dispatchesConfirmadosBase.filter(d=> {
+      // Normalizar la comparación: el filtro viene en formato desnormalizado (EL ALTO)
+      // pero d.ciudad está normalizado (el_alto), así que normalizamos el filtro para comparar
+      const ciudadMatches = !filtroCiudad || d.ciudad === normalizeCity(filtroCiudad);
+      const fechaDesdeMatches = !fechaDesdeConf || d.fecha >= fechaDesdeConf;
+      const fechaHastaMatches = !fechaHastaConf || d.fecha <= fechaHastaConf;
+      return ciudadMatches && fechaDesdeMatches && fechaHastaMatches;
+    }),
     [dispatchesConfirmadosBase, filtroCiudad, fechaDesdeConf, fechaHastaConf]
   );
   const PAGE_CONF = 20;
@@ -4992,7 +4996,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
     setConfirmModal({
       isOpen: true,
       title: 'Deshacer despacho',
-      message: `¿Deshacer despacho de ${rec.ciudad} (${rec.fecha})?`,
+      message: `¿Deshacer despacho de ${denormalizeCity(rec.ciudad)} (${rec.fecha})?`,
       onConfirm: async () => {
         setIsUndoingDispatch(true);
         setUndoingDispatchId(rec.id);
@@ -5225,7 +5229,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                   {dispatchesPendientes.map(d => (
                     <tr key={d.id} className="border-t border-neutral-800">
                       <td className="p-2">{toDMY(d.fecha)}</td>
-                      <td className="p-2">{d.ciudad}</td>
+                      <td className="p-2">{denormalizeCity(d.ciudad)}</td>
                       {productosColumns.map(p=>{
                         const it = d.items.find(i=>i.sku===p.sku);
                         return <td key={p.sku} className="p-2 text-right">{it?it.cantidad: ''}</td>;
@@ -5247,7 +5251,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
           <div className="bg-[#181f26] rounded-xl p-6 shadow-xl w-full max-w-xs text-center border border-neutral-700">
             <div className="mb-4 text-lg font-semibold text-red-500">¿Eliminar despacho?</div>
-            <div className="mb-6 text-neutral-400 text-sm">Esta acción no se puede deshacer.<br/>¿Seguro que deseas eliminar el despacho de <b style={{color:'#e7922b'}}>{confirmDelete.ciudad} ({toDMY(confirmDelete.fecha)})</b>?</div>
+            <div className="mb-6 text-neutral-400 text-sm">Esta acción no se puede deshacer.<br/>¿Seguro que deseas eliminar el despacho de <b style={{color:'#e7922b'}}>{denormalizeCity(confirmDelete.ciudad)} ({toDMY(confirmDelete.fecha)})</b>?</div>
             <div className="flex gap-3 justify-center">
               <button 
                 onClick={confirmDeleteDispatch} 
@@ -5311,7 +5315,7 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
                     {pageConfItems.map(d => (
                       <tr key={d.id} className="border-t border-neutral-800">
                         <td className="p-2">{toDMY(d.fecha)}</td>
-                        <td className="p-2">{d.ciudad}</td>
+                        <td className="p-2">{denormalizeCity(d.ciudad)}</td>
                         {productosColumns.map(p=>{
                           const it = d.items.find(i=>i.sku===p.sku);
                           return <td key={p.sku} className="p-2 text-right">{it?it.cantidad: ''}</td>;
@@ -5340,7 +5344,9 @@ function AlmacenView({ products, setProducts, dispatches, setDispatches, session
 
 // Despachos pendientes para ciudad con opción de confirmar o cancelar
 function CityPendingShipments({ city, dispatches, setDispatches, products, session }) {
-  const pendientes = dispatches.filter(d=>d.ciudad===city && d.status==='pendiente');
+  // Normalizar ciudad para comparar (dispatches.ciudad está normalizado: "la_paz", city viene desnormalizado: "LA PAZ")
+  const cityNormalized = normalizeCity(city);
+  const pendientes = dispatches.filter(d=>d.ciudad===cityNormalized && d.status==='pendiente');
   const [openId, setOpenId] = useState(null); // id abierto
   const [openPos, setOpenPos] = useState(null); // posición del botón lupa
   useEffect(()=>{

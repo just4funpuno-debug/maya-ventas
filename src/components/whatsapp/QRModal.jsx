@@ -210,13 +210,18 @@ export default function QRModal({
               )}
             </>
           ) : (
-            <button
-              onClick={onClose}
-              disabled={isChecking}
-              className="px-3 py-2 rounded-xl bg-neutral-700 text-xs text-neutral-200 hover:bg-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {isChecking ? 'Verificando...' : 'Cancelar'}
-            </button>
+            <>
+              <button
+                onClick={onClose}
+                disabled={isChecking}
+                className="px-3 py-2 rounded-xl bg-neutral-700 text-xs text-neutral-200 hover:bg-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isChecking ? 'Verificando...' : 'Omitir'}
+              </button>
+              <p className="text-xs text-neutral-500 mt-2 text-center">
+                Puedes configurar la coexistencia después desde Meta Developer Console
+              </p>
+            </>
           )}
         </div>
       </div>

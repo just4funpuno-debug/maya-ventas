@@ -377,7 +377,7 @@ serve(async (req) => {
         count: phoneNumbersData.data?.length || 0
       });
 
-      // Obtener el primer Phone Number
+      // Verificar que hay números disponibles
       if (!phoneNumbersData.data || phoneNumbersData.data.length === 0) {
         return new Response(
           JSON.stringify({
@@ -392,15 +392,80 @@ serve(async (req) => {
         );
       }
 
-      phoneNumberId = phoneNumbersData.data[0].id;
-      phoneNumber = phoneNumbersData.data[0].display_phone_number || phoneNumbersData.data[0].phone_number || null;
-      displayName = phoneNumbersData.data[0].verified_name || phoneNumbersData.data[0].display_phone_number || null;
+      // Guardar todos los números disponibles para que el usuario pueda elegir
+      const allPhoneNumbers = phoneNumbersData.data;
 
-      console.log('[Graph API] Phone Number obtenido', {
-        phoneNumberId,
-        phoneNumber,
-        displayName
-      });
+      // Si hay solo un número, usar ese (comportamiento automático)
+      // Si hay múltiples, retornar todos para que el usuario elija
+      if (allPhoneNumbers.length === 1) {
+        // Un solo número: comportamiento automático como antes
+        phoneNumberId = allPhoneNumbers[0].id;
+        phoneNumber = allPhoneNumbers[0].display_phone_number || allPhoneNumbers[0].phone_number || null;
+        displayName = allPhoneNumbers[0].verified_name || allPhoneNumbers[0].display_phone_number || null;
+        
+        console.log('[Graph API] Un solo número encontrado, usando automáticamente', {
+          phoneNumberId,
+          phoneNumber,
+          displayName
+        });
+      } else {
+        // Múltiples números: retornar lista para que el usuario elija
+        // No guardamos todavía, esperamos que el usuario seleccione
+        console.log('[Graph API] Múltiples números encontrados, se requiere selección del usuario', {
+          count: allPhoneNumbers.length
+        });
+        
+        // Retornar respuesta especial indicando que se requiere selección
+        const encodedData = btoa(JSON.stringify({
+          type: 'whatsapp_oauth_callback',
+          success: true,
+          requires_selection: true,
+          data: {
+            business_account_id: businessAccountId,
+            phone_numbers: allPhoneNumbers.map(pn => ({
+              id: pn.id,
+              display_phone_number: pn.display_phone_number || pn.phone_number || null,
+              phone_number: pn.phone_number || pn.display_phone_number || null,
+              verified_name: pn.verified_name || null,
+              quality_rating: pn.quality_rating || null
+            })),
+            access_token: accessToken, // Token temporal para obtener detalles después
+            meta_app_id: META_APP_ID,
+            meta_user_id: metaUserId || null
+          }
+        }));
+
+        // Obtener frontend URL (mismo código que antes)
+        let frontendUrl = Deno.env.get('FRONTEND_URL');
+        if (!frontendUrl) {
+          try {
+            const stateData = JSON.parse(atob(state));
+            if (stateData && stateData.frontend) {
+              frontendUrl = stateData.frontend;
+            }
+          } catch (e) {
+            // Ignorar
+          }
+        }
+        if (!frontendUrl) {
+          const referer = req.headers.get('referer') || '';
+          if (referer.includes('localhost') || referer.includes('127.0.0.1')) {
+            frontendUrl = 'http://localhost:5173';
+          } else {
+            frontendUrl = 'https://www.mayalife.shop';
+          }
+        }
+
+        const redirectUrl = `${frontendUrl}/oauth-callback.html#oauth-callback=${encodedData}`;
+        
+        return new Response(null, {
+          status: 302,
+          headers: {
+            ...corsHeaders,
+            'Location': redirectUrl
+          }
+        });
+      }
 
       // Paso 3: Obtener detalles adicionales del Phone Number (opcional)
       try {
@@ -762,7 +827,7 @@ serve(async (req) => {
     // Si no está en variables de entorno, intentar obtener del state
     if (!frontendUrl) {
       try {
-        // El state puede contener información codificada sobre el frontend
+        // El state ahora está codificado como base64 con { state: uuid, frontend: url }
         // Intenta decodificar el state para obtener la URL del frontend
         const stateData = JSON.parse(atob(state));
         if (stateData && stateData.frontend) {
@@ -770,8 +835,8 @@ serve(async (req) => {
           console.log('[Frontend URL] Obtenida del state:', frontendUrl);
         }
       } catch (e) {
-        // Si el state no está codificado o no tiene frontend, usar valores por defecto
-        console.warn('[Frontend URL] No se pudo obtener del state, usando default');
+        // Si el state no está codificado o no tiene frontend, intentar decodificar como string simple
+        console.warn('[Frontend URL] No se pudo obtener del state (formato codificado), intentando default');
       }
     }
     

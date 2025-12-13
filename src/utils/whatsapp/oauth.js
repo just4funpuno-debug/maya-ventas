@@ -39,6 +39,14 @@ export function buildOAuthUrl(state) {
   const redirectUri = import.meta.env.VITE_META_OAUTH_REDIRECT_URI || 
     `https://${projectRef}.supabase.co/functions/v1/meta-oauth-callback`;
 
+  // Incluir URL del frontend en el state para que la Edge Function sepa a dónde redirigir
+  // El state será: base64(JSON.stringify({ state: uuid, frontend: window.location.origin }))
+  const frontendOrigin = window.location.origin;
+  const stateWithFrontend = btoa(JSON.stringify({
+    state: state,
+    frontend: frontendOrigin
+  }));
+
   // Permisos necesarios para WhatsApp Business
   const scopes = [
     'whatsapp_business_management',
@@ -50,7 +58,7 @@ export function buildOAuthUrl(state) {
   const authUrl = new URL('https://www.facebook.com/v18.0/dialog/oauth');
   authUrl.searchParams.set('client_id', metaAppId);
   authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('state', stateWithFrontend);
   authUrl.searchParams.set('scope', scopes);
   authUrl.searchParams.set('response_type', 'code');
 
@@ -155,54 +163,95 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
     return () => {};
   }
 
+  // Variables para limpiar intervalos cuando se reciba el mensaje
+  let messageReceived = false;
+  let checkInterval = null;
+  let hashCheckInterval = null;
+
+  // Función para limpiar todos los listeners e intervalos
+  const cleanup = () => {
+    if (checkInterval) {
+      clearInterval(checkInterval);
+      checkInterval = null;
+    }
+    if (hashCheckInterval) {
+      clearInterval(hashCheckInterval);
+      hashCheckInterval = null;
+    }
+    window.removeEventListener('message', messageHandler);
+  };
+
   // Escuchar mensaje desde popup (el popup envía mensaje después de procesar el hash)
   const messageHandler = (event) => {
-    // Verificar origen (debe ser desde el mismo origen o Supabase)
-    const currentOrigin = window.location.origin;
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
-    
-    // Permitir mensajes del mismo origen o desde Supabase
-    if (event.origin !== currentOrigin && 
-        event.origin !== supabaseUrl?.replace(/\/$/, '') && 
-        !event.origin.includes('supabase.co')) {
-      console.warn('[OAuth] Mensaje de origen no permitido:', event.origin);
-      return;
-    }
+    console.log('[OAuth] Mensaje recibido:', {
+      origin: event.origin,
+      type: event.data?.type,
+      hasData: !!event.data
+    });
 
-    // Verificar que el popup aún existe
-    if (popup.closed) {
-      window.removeEventListener('message', messageHandler);
-      return;
-    }
-
-    // Procesar mensaje
+    // Procesar mensaje (verificar tipo primero)
     if (event.data && event.data.type === 'whatsapp_oauth_callback') {
-      window.removeEventListener('message', messageHandler);
+      console.log('[OAuth] Mensaje OAuth válido recibido', {
+        success: event.data.success,
+        hasData: !!event.data.data,
+        hasError: !!event.data.error
+      });
+
+      // Marcar que el mensaje fue recibido
+      messageReceived = true;
+
+      // Limpiar listeners e intervalos INMEDIATAMENTE
+      cleanup();
       
+      // Procesar el resultado
       if (event.data.success) {
+        console.log('[OAuth] Llamando onSuccess con datos');
         onSuccess(event.data.data);
       } else {
+        console.log('[OAuth] Llamando onError con error');
         onError(event.data.error || { message: 'Error desconocido' });
       }
+    } else {
+      // Mensaje que no es de OAuth, ignorar
+      console.log('[OAuth] Mensaje ignorado (no es de tipo OAuth)');
     }
   };
 
   window.addEventListener('message', messageHandler);
 
   // También verificar si el popup se cerró manualmente
-  const checkInterval = setInterval(() => {
-    if (popup.closed) {
-      clearInterval(checkInterval);
-      window.removeEventListener('message', messageHandler);
+  // Pero dar más tiempo para que el mensaje llegue antes de reportar cancelación
+  let popupClosedTime = null;
+  checkInterval = setInterval(() => {
+    // Si ya se recibió el mensaje, no hacer nada
+    if (messageReceived) {
+      return;
+    }
+
+    if (popup.closed && !popupClosedTime) {
+      // Popup se cerró, pero esperar 2 segundos por si llega un mensaje tardío
+      popupClosedTime = Date.now();
+      console.log('[OAuth] Popup cerrado, esperando mensaje...');
+    }
+    
+    // Si el popup se cerró hace más de 2 segundos Y no se recibió mensaje, asumir cancelación
+    if (popupClosedTime && Date.now() - popupClosedTime > 2000 && !messageReceived) {
+      cleanup();
+      console.warn('[OAuth] Popup cerrado sin recibir mensaje, cancelando OAuth');
       onError({ message: 'OAuth cancelado por el usuario' });
     }
   }, 1000);
 
   // También verificar el hash del popup periódicamente (fallback)
-  const hashCheckInterval = setInterval(() => {
+  hashCheckInterval = setInterval(() => {
     try {
+      // Si ya se recibió el mensaje, limpiar y salir
+      if (messageReceived) {
+        cleanup();
+        return;
+      }
+
       if (popup.closed) {
-        clearInterval(hashCheckInterval);
         return;
       }
 
@@ -216,9 +265,8 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
             const data = JSON.parse(atob(encodedData));
             
             if (data.type === 'whatsapp_oauth_callback') {
-              clearInterval(hashCheckInterval);
-              clearInterval(checkInterval);
-              window.removeEventListener('message', messageHandler);
+              messageReceived = true;
+              cleanup();
               
               if (data.success) {
                 onSuccess(data.data);
@@ -231,9 +279,8 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
             const errorData = JSON.parse(atob(encodedError));
             
             if (errorData.type === 'whatsapp_oauth_callback') {
-              clearInterval(hashCheckInterval);
-              clearInterval(checkInterval);
-              window.removeEventListener('message', messageHandler);
+              messageReceived = true;
+              cleanup();
               onError(errorData.error || { message: 'Error desconocido' });
             }
           }
@@ -249,9 +296,7 @@ export function listenOAuthCallback(popup, onSuccess, onError) {
 
   // Retornar función para cancelar
   return () => {
-    clearInterval(checkInterval);
-    clearInterval(hashCheckInterval);
-    window.removeEventListener('message', messageHandler);
+    cleanup();
   };
 }
 

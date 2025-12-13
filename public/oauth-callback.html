@@ -50,27 +50,62 @@
 
   <script>
     (function() {
+      console.log('[OAuth Callback] Iniciando procesamiento...', {
+        hash: window.location.hash.substring(0, 100),
+        hasOpener: !!window.opener,
+        openerClosed: window.opener ? window.opener.closed : 'N/A'
+      });
+
       try {
         // Procesar hash de OAuth
         const hash = window.location.hash;
         
         if (hash.includes('oauth-callback=')) {
+          console.log('[OAuth Callback] Hash contiene oauth-callback');
           // OAuth exitoso
           const encodedData = hash.split('oauth-callback=')[1].split('&')[0];
           const data = JSON.parse(atob(encodedData));
           
           // Enviar mensaje al parent window
-          if (window.opener) {
-            window.opener.postMessage({
-              type: 'whatsapp_oauth_callback',
-              success: true,
-              data: data.data
-            }, window.location.origin);
-            
-            document.getElementById('message').textContent = '¡Conexión exitosa! Cerrando ventana...';
-            setTimeout(() => window.close(), 1000);
+          console.log('[OAuth Callback] Preparando envío de mensaje', {
+            hasOpener: !!window.opener,
+            openerClosed: window.opener ? window.opener.closed : 'N/A',
+            dataKeys: data.data ? Object.keys(data.data) : 'no data'
+          });
+
+          if (window.opener && !window.opener.closed) {
+            // Usar '*' como origen para permitir cross-origin (mismo origen ya está permitido)
+            // El parent window verificará el origen del mensaje
+            try {
+              const messageData = {
+                type: 'whatsapp_oauth_callback',
+                success: true,
+                data: data.data
+              };
+              
+              console.log('[OAuth Callback] Enviando mensaje:', {
+                type: messageData.type,
+                success: messageData.success,
+                hasData: !!messageData.data
+              });
+              
+              window.opener.postMessage(messageData, '*'); // Usar '*' para permitir mensajes cross-origin
+              
+              console.log('[OAuth Callback] Mensaje enviado exitosamente al parent window');
+              document.getElementById('message').textContent = '¡Conexión exitosa! Cerrando ventana...';
+              
+              // Dar más tiempo para que el mensaje llegue antes de cerrar
+              setTimeout(() => {
+                console.log('[OAuth Callback] Cerrando ventana...');
+                window.close();
+              }, 2000); // Aumentado a 2 segundos
+            } catch (err) {
+              console.error('[OAuth Callback] Error enviando mensaje:', err);
+              document.getElementById('message').textContent = 'Error al comunicar con la ventana principal: ' + err.message;
+              document.getElementById('message').className = 'message error';
+            }
           } else {
-            document.getElementById('message').textContent = 'Error: No se pudo comunicar con la ventana principal';
+            document.getElementById('message').textContent = 'Error: No se pudo comunicar con la ventana principal (popup cerrado o bloqueado)';
             document.getElementById('message').className = 'message error';
           }
         } else if (hash.includes('oauth-error=')) {
@@ -79,24 +114,48 @@
           const errorData = JSON.parse(atob(encodedError));
           
           // Enviar mensaje de error al parent window
-          if (window.opener) {
-            window.opener.postMessage({
-              type: 'whatsapp_oauth_callback',
-              success: false,
-              error: errorData.error
-            }, window.location.origin);
-            
-            document.getElementById('message').textContent = 'Error al conectar. Cerrando ventana...';
-            document.getElementById('message').className = 'message error';
-            setTimeout(() => window.close(), 2000);
+          if (window.opener && !window.opener.closed) {
+            try {
+              window.opener.postMessage({
+                type: 'whatsapp_oauth_callback',
+                success: false,
+                error: errorData.error
+              }, '*'); // Usar '*' para permitir mensajes cross-origin
+              
+              console.log('[OAuth Callback] Mensaje de error enviado al parent window');
+              document.getElementById('message').textContent = 'Error al conectar. Cerrando ventana...';
+              document.getElementById('message').className = 'message error';
+              setTimeout(() => window.close(), 2000);
+            } catch (err) {
+              console.error('[OAuth Callback] Error enviando mensaje de error:', err);
+              document.getElementById('message').textContent = 'Error: ' + (errorData.error?.message || 'Error desconocido');
+              document.getElementById('message').className = 'message error';
+            }
           } else {
             document.getElementById('message').textContent = 'Error: ' + (errorData.error?.message || 'Error desconocido');
             document.getElementById('message').className = 'message error';
           }
         } else {
           // No hay hash OAuth
-          document.getElementById('message').textContent = 'No se encontró información de OAuth';
+          console.warn('[OAuth Callback] No se encontró hash OAuth en la URL', {
+            hash: hash,
+            fullUrl: window.location.href
+          });
+          document.getElementById('message').textContent = 'No se encontró información de OAuth en la URL. Hash: ' + (hash || '(vacío)');
           document.getElementById('message').className = 'message error';
+          
+          // Intentar enviar error al parent si existe
+          if (window.opener && !window.opener.closed) {
+            try {
+              window.opener.postMessage({
+                type: 'whatsapp_oauth_callback',
+                success: false,
+                error: { message: 'No se encontró información de OAuth en la URL' }
+              }, '*');
+            } catch (err) {
+              console.error('[OAuth Callback] Error enviando mensaje de error:', err);
+            }
+          }
         }
       } catch (err) {
         console.error('[OAuth Callback] Error procesando hash:', err);
@@ -104,12 +163,16 @@
         document.getElementById('message').className = 'message error';
         
         // Intentar enviar error al parent
-        if (window.opener) {
-          window.opener.postMessage({
-            type: 'whatsapp_oauth_callback',
-            success: false,
-            error: { message: err.message }
-          }, window.location.origin);
+        if (window.opener && !window.opener.closed) {
+          try {
+            window.opener.postMessage({
+              type: 'whatsapp_oauth_callback',
+              success: false,
+              error: { message: err.message }
+            }, '*'); // Usar '*' para permitir mensajes cross-origin
+          } catch (postErr) {
+            console.error('[OAuth Callback] Error enviando mensaje de error al parent:', postErr);
+          }
         }
       }
     })();

@@ -68,10 +68,9 @@ export default function WhatsAppAccountManager({ session }) {
         const filtered = getUserProducts(session, data || []);
         setUserProducts(filtered);
         
-        // FASE 3: SUBFASE 3.4 - Si hay productos y no hay selección, seleccionar el primero (siempre, sin importar si es admin)
-        if (filtered.length > 0 && !selectedProductId) {
-          setSelectedProductId(filtered[0].id);
-        }
+        // NOTA: No establecer selectedProductId automáticamente aquí
+        // para evitar condición de carrera con loadAccounts
+        // El usuario verá todas las cuentas inicialmente y puede seleccionar un producto si lo desea
       }
     } catch (err) {
       console.warn('[WhatsAppAccountManager] No se pudieron cargar productos:', err);
@@ -237,7 +236,8 @@ export default function WhatsAppAccountManager({ session }) {
 
   // Obtener productos para mostrar en tabs
   const productsToShow = admin ? products : userProducts;
-  const hasMultipleProducts = productsToShow.length > 1 || admin;
+  // Mostrar tabs si hay al menos un producto (para permitir seleccionar "Todas" o un producto específico)
+  const hasMultipleProducts = productsToShow.length > 0;
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -272,6 +272,17 @@ export default function WhatsAppAccountManager({ session }) {
         {/* Tabs por productos */}
         {hasMultipleProducts && (
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-neutral-800">
+            {/* Tab "Todas" para mostrar todas las cuentas */}
+            <button
+              onClick={() => setSelectedProductId(null)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition ${
+                selectedProductId === null
+                  ? 'bg-[#e7922b] text-[#1a2430]'
+                  : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+              }`}
+            >
+              Todas
+            </button>
             {productsToShow.map(product => (
               <button
                 key={product.id}
